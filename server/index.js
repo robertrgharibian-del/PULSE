@@ -263,11 +263,11 @@ app.post("/api/users", auth, requireRole("master"), async (req, res) => {
 });
 
 app.patch("/api/users/:id", auth, requireRole("master"), async (req, res) => {
-  const { is_active, territory, rm_id, full_name, password } = req.body;
+  const { is_active, territory, rm_id, full_name, group_id, password } = req.body;
   const fields = [];
   const values = [];
   let i = 1;
-  const plain = { is_active, territory, rm_id, full_name };
+  const plain = { is_active, territory, rm_id, full_name, group_id };
   for (const [k, v] of Object.entries(plain)) {
     if (v !== undefined) {
       fields.push(`${k} = $${i++}`);
@@ -285,6 +285,15 @@ app.patch("/api/users/:id", auth, requireRole("master"), async (req, res) => {
   if (password) {
     await pool.query("update password_reset_requests set status='resolved', resolved_at=now() where user_id=$1 and status='pending'", [req.params.id]);
   }
+  res.json({ ok: true });
+});
+
+app.delete("/api/users/:id", auth, requireRole("master"), async (req, res) => {
+  const { id } = req.params;
+  if (String(id) === String(req.user.id)) return res.status(400).json({ error: "Нельзя удалить собственный аккаунт" });
+  const check = await pool.query("select role from users where id=$1", [id]);
+  if (!check.rows[0]) return res.status(404).json({ error: "Пользователь не найден" });
+  await pool.query("update users set is_active=false where id=$1", [id]);
   res.json({ ok: true });
 });
 

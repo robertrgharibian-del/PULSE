@@ -344,5 +344,5 @@ update products set group_id = (select id from groups where name='Prime')
 -- generate your own hash and update this row.
 -- ============================================================
 insert into users (email, password_hash, full_name, role)
-values ('admin@fss.local', '$2b$10$0ec5JdSYxe3dQ1OCFAcMeu8axRzyiHzxbHU7B2uT3G7fvtr7U4wAG', 'Master Admin', 'master')
+values ('admin@fss.local', '$2b$10$0ec5JdSYxe3dQ1OCFAcMeu8axRzyiHzxbHU7B2uT3G7fvtr7U4wAG', 'Роберт Гарибян', 'master')
 on conflict (email) do nothing;
