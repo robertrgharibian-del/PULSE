@@ -141,6 +141,92 @@ function ResetRequests({ onResolved }) {
   );
 }
 
+function EditUserRow({ u, rms, territories, groups, onSaved }) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({ full_name: u.full_name, territory: u.territory || "", rm_id: u.rm_id || "", group_id: u.group_id || "" });
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    setBusy(true); setError("");
+    try {
+      const payload = { full_name: form.full_name };
+      if (u.role === "mp") { payload.territory = form.territory; payload.rm_id = form.rm_id; }
+      if (u.role === "mp" || u.role === "bm") payload.group_id = form.group_id || null;
+      await api.patchUser(u.id, payload);
+      setEditing(false);
+      onSaved();
+    } catch (e) { setError(e.message); } finally { setBusy(false); }
+  }
+
+  async function toggleActive() {
+    if (u.is_active) {
+      if (!confirm(`Удалить аккаунт «${u.full_name}»? Он потеряет доступ к системе.`)) return;
+      if (!confirm(`Это нужно подтвердить ещё раз. Точно удалить «${u.full_name}»?`)) return;
+      setBusy(true);
+      try { await api.deleteUser(u.id); onSaved(); } catch (e) { setError(e.message); } finally { setBusy(false); }
+    } else {
+      setBusy(true);
+      try { await api.patchUser(u.id, { is_active: true }); onSaved(); } catch (e) { setError(e.message); } finally { setBusy(false); }
+    }
+  }
+
+  if (editing) {
+    return (
+      <tr style={{ borderTop: "1px solid #22304A", background: "#1B2A44" }}>
+        <td colSpan={7} className="px-4 py-3">
+          <div className="grid sm:grid-cols-2 gap-2 text-sm mb-2">
+            <input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} placeholder="Имя"
+              className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#3A4A66" }} />
+            {u.role === "mp" && (
+              <select value={form.territory} onChange={(e) => setForm({ ...form, territory: e.target.value })} className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#3A4A66" }}>
+                {territories.map((t) => <option key={t.key} value={t.label} style={{ color: "#000" }}>{t.label}</option>)}
+              </select>
+            )}
+            {(u.role === "mp" || u.role === "bm") && (
+              <select value={form.group_id} onChange={(e) => setForm({ ...form, group_id: e.target.value })} className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#3A4A66" }}>
+                <option value="" style={{ color: "#000" }}>Без группы</option>
+                {groups.map((g) => <option key={g.id} value={g.id} style={{ color: "#000" }}>{g.name}</option>)}
+              </select>
+            )}
+            {u.role === "mp" && (
+              <select value={form.rm_id} onChange={(e) => setForm({ ...form, rm_id: e.target.value })} className="bg-transparent border rounded px-2 py-1.5 sm:col-span-2" style={{ borderColor: "#3A4A66" }}>
+                {rms.map((rm) => <option key={rm.id} value={rm.id} style={{ color: "#000" }}>{rm.full_name}</option>)}
+              </select>
+            )}
+          </div>
+          {error && <div className="text-xs mb-2" style={{ color: "#E2574C" }}>{error}</div>}
+          <div className="flex gap-2">
+            <button onClick={save} disabled={busy} className="px-3 py-1.5 rounded text-xs font-semibold" style={{ background: "#3FB88F", color: "#0E1726" }}>Сохранить</button>
+            <button onClick={() => setEditing(false)} className="px-3 py-1.5 rounded text-xs" style={{ background: "#22304A" }}>Отмена</button>
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
+  return (
+    <tr style={{ borderTop: "1px solid #22304A", opacity: u.is_active ? 1 : 0.5 }}>
+      <td className="px-4 py-3">{u.full_name} {!u.is_active && <span style={{ color: "#E2574C" }}>(удалён)</span>}</td>
+      <td className="px-4 py-3">{ROLE_LABEL[u.role] || u.role}</td>
+      <td className="px-4 py-3" style={{ color: "#8493AA" }}>{u.rm_name || "—"}</td>
+      <td className="px-4 py-3" style={{ color: "#8493AA" }}>{u.group_name || "—"}</td>
+      <td className="px-4 py-3" style={{ color: "#8493AA" }}>{u.territory || "—"}</td>
+      <td className="px-4 py-3" style={{ color: "#8493AA" }}>{u.email}</td>
+      <td className="px-4 py-3 text-right whitespace-nowrap">
+        {u.role !== "master" && (
+          <>
+            <button onClick={() => setEditing(true)} className="text-xs mr-3" style={{ color: "#E8B04B" }}>Изменить</button>
+            <button onClick={toggleActive} disabled={busy} className="text-xs" style={{ color: u.is_active ? "#E2574C" : "#3FB88F" }}>
+              {u.is_active ? "Удалить" : "Восстановить"}
+            </button>
+          </>
+        )}
+      </td>
+    </tr>
+  );
+}
+
 export default function MasterUsers() {
   const [users, setUsers] = useState([]);
   const [rms, setRms] = useState([]);
@@ -171,18 +257,12 @@ export default function MasterUsers() {
               <th className="text-left px-4 py-3">Имя</th><th className="text-left px-4 py-3">Роль</th>
               <th className="text-left px-4 py-3">РМ</th><th className="text-left px-4 py-3">Группа</th>
               <th className="text-left px-4 py-3">Территория</th><th className="text-left px-4 py-3">Email</th>
+              <th className="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody>
             {users.map((u) => (
-              <tr key={u.id} style={{ borderTop: "1px solid #22304A" }}>
-                <td className="px-4 py-3">{u.full_name}</td>
-                <td className="px-4 py-3">{ROLE_LABEL[u.role] || u.role}</td>
-                <td className="px-4 py-3" style={{ color: "#8493AA" }}>{u.rm_name || "—"}</td>
-                <td className="px-4 py-3" style={{ color: "#8493AA" }}>{u.group_name || "—"}</td>
-                <td className="px-4 py-3" style={{ color: "#8493AA" }}>{u.territory || "—"}</td>
-                <td className="px-4 py-3" style={{ color: "#8493AA" }}>{u.email}</td>
-              </tr>
+              <EditUserRow key={u.id} u={u} rms={rms} territories={territories} groups={groups} onSaved={loadAll} />
             ))}
           </tbody>
         </table>

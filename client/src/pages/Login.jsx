@@ -72,8 +72,9 @@ export default function Login({ onLogin }) {
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
       <form onSubmit={submit} className="w-full max-w-sm rounded-2xl p-8" style={{ background: "#141F33", border: "1px solid #22304A" }}>
-        <div className="font-display uppercase tracking-widest text-xs mb-1" style={{ color: "#E8B04B" }}>FY'27 · Field Force</div>
-        <h1 className="font-display text-2xl font-semibold mb-6">FSS Review Platform</h1>
+        <img src="/pulse-logo.png" alt="PULSE" style={{ height: "40px", width: "auto" }} className="mb-4" />
+        <h1 className="font-display text-2xl font-semibold mb-1">PULSE</h1>
+        <div className="text-sm mb-6" style={{ color: "#8493AA" }}>Интерактивный помощник для медицинского представителя MSN Узбекистан</div>
 
         <label className="block text-xs uppercase tracking-wide mb-1" style={{ color: "#8493AA" }}>Email</label>
         <input

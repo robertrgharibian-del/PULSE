@@ -18,6 +18,8 @@ export default function PortfolioDetail({ productId, user, onBack }) {
   const [compDirect, setCompDirect] = useState(true);
   const [compPrice, setCompPrice] = useState("");
   const [deleted, setDeleted] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadDone, setUploadDone] = useState(false);
 
   async function load() {
     const d = await api.getPortfolioItem(productId);
@@ -63,9 +65,12 @@ export default function PortfolioDetail({ productId, user, onBack }) {
   async function uploadFile(e) {
     const file = e.target.files[0];
     if (!file) return;
-    setBusy(true); setError("");
-    try { await api.uploadPortfolioFile(productId, uploadType, file); await load(); }
-    catch (err) { setError(err.message); } finally { setBusy(false); e.target.value = ""; }
+    setBusy(true); setError(""); setUploadProgress(0); setUploadDone(false);
+    try {
+      await api.uploadPortfolioFile(productId, uploadType, file, (pct) => setUploadProgress(pct));
+      setUploadDone(true);
+      await load();
+    } catch (err) { setError(err.message); } finally { setBusy(false); e.target.value = ""; setTimeout(() => { setUploadProgress(0); setUploadDone(false); }, 2500); }
   }
 
   async function removeFile(id) {
@@ -156,16 +161,27 @@ export default function PortfolioDetail({ productId, user, onBack }) {
           {data.files.length === 0 && <div className="text-sm" style={{ color: "#8493AA" }}>Файлов пока нет</div>}
         </div>
         {canEdit && (
-          <div className="flex flex-wrap items-center gap-2">
-            <select value={uploadType} onChange={(e) => setUploadType(e.target.value)} className="bg-transparent border rounded px-2 py-2 text-sm" style={{ borderColor: "#3A4A66" }}>
-              <option value="pil" style={{ color: "#000" }}>PIL</option>
-              <option value="slides" style={{ color: "#000" }}>Слайды</option>
-              <option value="other" style={{ color: "#000" }}>Другое</option>
-            </select>
-            <label className="px-4 py-2 rounded text-sm cursor-pointer" style={{ background: "#3FB88F", color: "#0E1726" }}>
-              Загрузить файл
-              <input type="file" onChange={uploadFile} className="hidden" />
-            </label>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <select value={uploadType} onChange={(e) => setUploadType(e.target.value)} className="bg-transparent border rounded px-2 py-2 text-sm" style={{ borderColor: "#3A4A66" }}>
+                <option value="pil" style={{ color: "#000" }}>PIL</option>
+                <option value="slides" style={{ color: "#000" }}>Слайды</option>
+                <option value="other" style={{ color: "#000" }}>Другое</option>
+              </select>
+              <label className="px-4 py-2 rounded text-sm cursor-pointer" style={{ background: "#3FB88F", color: "#0E1726" }}>
+                Загрузить файл
+                <input type="file" onChange={uploadFile} className="hidden" disabled={busy} />
+              </label>
+            </div>
+            {busy && uploadProgress > 0 && (
+              <div className="mt-3">
+                <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: "#22304A" }}>
+                  <div className="h-full rounded-full transition-all" style={{ width: `${uploadProgress}%`, background: "#E8B04B" }} />
+                </div>
+                <div className="text-xs mt-1" style={{ color: "#8493AA" }}>{uploadProgress}%</div>
+              </div>
+            )}
+            {uploadDone && <div className="text-sm mt-2" style={{ color: "#3FB88F" }}>✓ Загружено успешно</div>}
           </div>
         )}
       </div>

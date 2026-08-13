@@ -74,6 +74,23 @@ function ImportHistory({ refreshKey }) {
   );
 }
 
+function ProgressBar({ progress, done }) {
+  if (!progress && !done) return null;
+  return (
+    <div className="mt-3">
+      {!done && (
+        <>
+          <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: "#22304A" }}>
+            <div className="h-full rounded-full transition-all" style={{ width: `${progress}%`, background: "#E8B04B" }} />
+          </div>
+          <div className="text-xs mt-1" style={{ color: "#8493AA" }}>{progress}%</div>
+        </>
+      )}
+      {done && <div className="text-sm" style={{ color: "#3FB88F" }}>✓ Загружено успешно</div>}
+    </div>
+  );
+}
+
 export default function MasterImports() {
   const now = new Date();
   const [fssYear, setFssYear] = useState(now.getFullYear());
@@ -82,25 +99,37 @@ export default function MasterImports() {
   const [fssBusy, setFssBusy] = useState(false);
   const [fssResult, setFssResult] = useState(null);
   const [fssError, setFssError] = useState("");
+  const [fssProgress, setFssProgress] = useState(0);
+  const [fssDone, setFssDone] = useState(false);
 
   const [fy, setFy] = useState(27);
   const [tgtFile, setTgtFile] = useState(null);
   const [tgtBusy, setTgtBusy] = useState(false);
   const [tgtResult, setTgtResult] = useState(null);
   const [tgtError, setTgtError] = useState("");
+  const [tgtProgress, setTgtProgress] = useState(0);
+  const [tgtDone, setTgtDone] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
   async function uploadFss() {
     if (!fssFile) { setFssError("Выберите файл"); return; }
-    setFssBusy(true); setFssError(""); setFssResult(null);
-    try { setFssResult(await api.importFss(fssFile, fssYear, fssMonth)); setRefreshKey((k) => k + 1); }
-    catch (e) { setFssError(e.message); } finally { setFssBusy(false); }
+    setFssBusy(true); setFssError(""); setFssResult(null); setFssProgress(0); setFssDone(false);
+    try {
+      const result = await api.importFss(fssFile, fssYear, fssMonth, (pct) => setFssProgress(pct));
+      setFssDone(true);
+      setFssResult(result);
+      setRefreshKey((k) => k + 1);
+    } catch (e) { setFssError(e.message); } finally { setFssBusy(false); }
   }
   async function uploadTargets() {
     if (!tgtFile) { setTgtError("Выберите файл"); return; }
-    setTgtBusy(true); setTgtError(""); setTgtResult(null);
-    try { setTgtResult(await api.importTargets(tgtFile, fy)); setRefreshKey((k) => k + 1); }
-    catch (e) { setTgtError(e.message); } finally { setTgtBusy(false); }
+    setTgtBusy(true); setTgtError(""); setTgtResult(null); setTgtProgress(0); setTgtDone(false);
+    try {
+      const result = await api.importTargets(tgtFile, fy, (pct) => setTgtProgress(pct));
+      setTgtDone(true);
+      setTgtResult(result);
+      setRefreshKey((k) => k + 1);
+    } catch (e) { setTgtError(e.message); } finally { setTgtBusy(false); }
   }
 
   return (
@@ -132,6 +161,7 @@ export default function MasterImports() {
           </button>
         )}
         {fssError && <div className="text-sm mt-3" style={{ color: "#E2574C" }}>{fssError}</div>}
+        <ProgressBar progress={fssProgress} done={fssDone} />
         <ResultBox result={fssResult} />
       </div>
 
@@ -151,6 +181,7 @@ export default function MasterImports() {
           </button>
         )}
         {tgtError && <div className="text-sm mt-3" style={{ color: "#E2574C" }}>{tgtError}</div>}
+        <ProgressBar progress={tgtProgress} done={tgtDone} />
         <ResultBox result={tgtResult} />
       </div>
 

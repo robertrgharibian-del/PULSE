@@ -17,6 +17,28 @@ async function request(path, { method = "GET", body, raw } = {}) {
   return data;
 }
 
+// fetch() has no upload-progress events — XHR does. Used for every file upload
+// (Portfolio materials, FSS/Target imports) so the UI can show a real progress bar.
+function uploadWithProgress(url, formData, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    const token = localStorage.getItem("fss_token");
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText); } catch (e) {}
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+      else reject(new Error(data.error || `Ошибка загрузки (${xhr.status})`));
+    };
+    xhr.onerror = () => reject(new Error("Сетевая ошибка при загрузке"));
+    xhr.send(formData);
+  });
+}
+
 export const api = {
   login: (email, password) => request("/api/auth/login", { method: "POST", body: { email, password } }),
   requestReset: (email) => request("/api/auth/request-reset", { method: "POST", body: { email } }),
@@ -30,6 +52,7 @@ export const api = {
   createGroup: (name) => request("/api/groups", { method: "POST", body: { name } }),
   createUser: (payload) => request("/api/users", { method: "POST", body: payload }),
   patchUser: (id, payload) => request(`/api/users/${id}`, { method: "PATCH", body: payload }),
+  deleteUser: (id) => request(`/api/users/${id}`, { method: "DELETE" }),
   mpProfile: (mpId) => request(`/api/mp-profile/${mpId}`),
   saveDevelopmentPlan: (mpId, payload) => request(`/api/development-plans/${mpId}`, { method: "PUT", body: payload }),
   listTrackedDoctors: () => request("/api/doc-tracking/doctors"),
@@ -48,13 +71,10 @@ export const api = {
   updateCompetitor: (cid, payload) => request(`/api/portfolio/competitors/${cid}`, { method: "PUT", body: payload }),
   deleteCompetitor: (cid) => request(`/api/portfolio/competitors/${cid}`, { method: "DELETE" }),
   deletePortfolioFile: (fileId) => request(`/api/portfolio/files/${fileId}`, { method: "DELETE" }),
-  uploadPortfolioFile: async (productId, fileType, file) => {
+  uploadPortfolioFile: (productId, fileType, file, onProgress) => {
     const fd = new FormData();
     fd.append("file", file); fd.append("file_type", fileType);
-    const res = await fetch(`${BASE}/api/portfolio/${productId}/files`, { method: "POST", headers: authHeaders(), body: fd });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || "Ошибка загрузки файла");
-    return data;
+    return uploadWithProgress(`${BASE}/api/portfolio/${productId}/files`, fd, onProgress);
   },
   portfolioFileUrl: (fileId) => `${BASE}/api/portfolio/files/${fileId}`,
   portfolioBrochureUrl: (id) => `${BASE}/api/portfolio/${id}/brochure.pdf`,
@@ -93,21 +113,15 @@ export const api = {
 
   exportUrl: (id, type) => `${BASE}/api/reports/${id}/export/${type}`,
 
-  importFss: async (file, year, month) => {
+  importFss: (file, year, month, onProgress) => {
     const fd = new FormData();
     fd.append("file", file); fd.append("year", year); fd.append("month", month);
-    const res = await fetch(`${BASE}/api/import/fss`, { method: "POST", headers: authHeaders(), body: fd });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || "Ошибка загрузки");
-    return data;
+    return uploadWithProgress(`${BASE}/api/import/fss`, fd, onProgress);
   },
-  importTargets: async (file, fy) => {
+  importTargets: (file, fy, onProgress) => {
     const fd = new FormData();
     fd.append("file", file); fd.append("fy", fy);
-    const res = await fetch(`${BASE}/api/import/targets`, { method: "POST", headers: authHeaders(), body: fd });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || "Ошибка загрузки");
-    return data;
+    return uploadWithProgress(`${BASE}/api/import/targets`, fd, onProgress);
   },
 };
 
