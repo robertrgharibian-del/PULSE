@@ -5,6 +5,8 @@ const FILE_TYPE_LABEL = { pil: "PIL (инструкция)", slides: "Слайд
 
 export default function PortfolioDetail({ productId, user, onBack }) {
   const [data, setData] = useState(null);
+  const [name, setName] = useState("");
+  const [nrvUsd, setNrvUsd] = useState("");
   const [keyMessages, setKeyMessages] = useState("");
   const [positioning, setPositioning] = useState("");
   const [patientPortraits, setPatientPortraits] = useState("");
@@ -15,25 +17,47 @@ export default function PortfolioDetail({ productId, user, onBack }) {
   const [compName, setCompName] = useState("");
   const [compDirect, setCompDirect] = useState(true);
   const [compPrice, setCompPrice] = useState("");
+  const [deleted, setDeleted] = useState(false);
 
   async function load() {
     const d = await api.getPortfolioItem(productId);
     setData(d);
+    setName(d.product.name || "");
+    setNrvUsd(String(d.product.nrv_usd ?? ""));
     setKeyMessages(d.product.key_messages || "");
     setPositioning(d.product.positioning || "");
     setPatientPortraits(d.product.patient_portraits || "");
   }
   useEffect(() => { load(); }, [productId]);
 
+  if (deleted) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 sm:px-5 py-8">
+        <div className="text-sm mb-4" style={{ color: "#3FB88F" }}>✓ Препарат удалён из портфолио</div>
+        <button onClick={onBack} className="text-sm" style={{ color: "#8493AA" }}>← Назад к портфолио</button>
+      </div>
+    );
+  }
+
   if (!data) return <div className="p-8" style={{ color: "#8493AA" }}>Загрузка…</div>;
 
   async function saveContent() {
     setBusy(true); setError(""); setSaved(false);
     try {
-      await api.updatePortfolioItem(productId, { key_messages: keyMessages, positioning, patient_portraits: patientPortraits });
+      await api.updatePortfolioItem(productId, { name, nrv_usd: Number(nrvUsd) || 0, key_messages: keyMessages, positioning, patient_portraits: patientPortraits });
       setSaved(true);
       await load();
     } catch (e) { setError(e.message); } finally { setBusy(false); }
+  }
+
+  async function deleteProduct() {
+    if (!confirm(`Удалить препарат «${data.product.name}» из портфолио? Он исчезнет из всех списков.`)) return;
+    if (!confirm(`Это действие нужно подтвердить ещё раз. Точно удалить «${data.product.name}»?`)) return;
+    setBusy(true); setError("");
+    try {
+      await api.deletePortfolioItem(productId);
+      setDeleted(true);
+    } catch (e) { setError(e.message); setBusy(false); }
   }
 
   async function uploadFile(e) {
@@ -71,11 +95,24 @@ export default function PortfolioDetail({ productId, user, onBack }) {
       <button onClick={onBack} className="text-sm mb-4" style={{ color: "#8493AA" }}>← Назад к портфолио</button>
 
       <div className="flex flex-wrap items-start justify-between gap-3 mb-6">
-        <div>
-          <div className="font-display text-2xl font-semibold">{data.product.name}</div>
-          <div className="text-sm" style={{ color: "#8493AA" }}>{data.product.group_name || "—"} · ${Number(data.product.nrv_usd).toFixed(2)}</div>
+        <div className="flex-1 min-w-[200px]">
+          {canEdit ? (
+            <>
+              <input value={name} onChange={(e) => setName(e.target.value)} className="font-display text-2xl font-semibold bg-transparent border-b outline-none w-full mb-1" style={{ borderColor: "#3A4A66" }} />
+              <div className="flex items-center gap-2 text-sm" style={{ color: "#8493AA" }}>
+                {data.product.group_name || "—"} ·
+                <span>$</span>
+                <input type="number" value={nrvUsd} onChange={(e) => setNrvUsd(e.target.value)} className="bg-transparent border-b outline-none w-20 font-mono" style={{ borderColor: "#3A4A66" }} />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="font-display text-2xl font-semibold">{data.product.name}</div>
+              <div className="text-sm" style={{ color: "#8493AA" }}>{data.product.group_name || "—"} · ${Number(data.product.nrv_usd).toFixed(2)}</div>
+            </>
+          )}
         </div>
-        <button onClick={() => authedDownload(api.portfolioBrochureUrl(productId))} className="px-4 py-2 rounded text-sm" style={{ background: "#22304A" }}>Скачать брошюру (PDF)</button>
+        <button onClick={() => authedDownload(api.portfolioBrochureUrl(productId))} className="px-4 py-2 rounded text-sm shrink-0" style={{ background: "#22304A" }}>Скачать брошюру (PDF)</button>
       </div>
 
       {error && <div className="text-sm mb-4 px-3 py-2 rounded" style={{ background: "#E2574C22", color: "#E2574C" }}>{error}</div>}
@@ -91,9 +128,14 @@ export default function PortfolioDetail({ productId, user, onBack }) {
           </div>
         ))}
         {canEdit && (
-          <button onClick={saveContent} disabled={busy} className="px-4 py-2 rounded font-semibold" style={{ background: "#3FB88F", color: "#0E1726" }}>
-            {saved ? "✓ Сохранено" : "Сохранить"}
-          </button>
+          <div className="flex flex-wrap gap-3">
+            <button onClick={saveContent} disabled={busy} className="px-4 py-2 rounded font-semibold" style={{ background: "#3FB88F", color: "#0E1726" }}>
+              {saved ? "✓ Сохранено" : "Сохранить"}
+            </button>
+            <button onClick={deleteProduct} disabled={busy} className="px-4 py-2 rounded font-semibold" style={{ background: "#E2574C22", color: "#E2574C" }}>
+              Удалить препарат
+            </button>
+          </div>
         )}
       </div>
 

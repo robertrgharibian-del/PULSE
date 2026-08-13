@@ -43,6 +43,7 @@ export const api = {
   getPortfolioItem: (id) => request(`/api/portfolio/${id}`),
   createPortfolioItem: (payload) => request("/api/portfolio", { method: "POST", body: payload }),
   updatePortfolioItem: (id, payload) => request(`/api/portfolio/${id}`, { method: "PUT", body: payload }),
+  deletePortfolioItem: (id) => request(`/api/portfolio/${id}`, { method: "DELETE" }),
   addCompetitor: (id, payload) => request(`/api/portfolio/${id}/competitors`, { method: "POST", body: payload }),
   updateCompetitor: (cid, payload) => request(`/api/portfolio/competitors/${cid}`, { method: "PUT", body: payload }),
   deleteCompetitor: (cid) => request(`/api/portfolio/competitors/${cid}`, { method: "DELETE" }),

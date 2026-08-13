@@ -11,6 +11,7 @@ const nodemailer = require("nodemailer");
 const { createEvents } = require("ics");
 const multer = require("multer");
 const PDFDocument = require("pdfkit");
+const { PDFDocument: PdfLibDocument } = require("pdf-lib");
 const cron = require("node-cron");
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 const { TERRITORIES, parseFssWorkbook, parseTargetsWorkbook, monthToCalendarYear } = require("./import.js");
@@ -399,7 +400,7 @@ app.get("/api/portfolio", auth, async (req, res) => {
             (select count(*) from product_files f where f.product_id=p.id and f.file_type='pil') as pil_count,
             (select count(*) from product_files f where f.product_id=p.id and f.file_type='slides') as slides_count
      from products p left join groups g on g.id=p.group_id
-     where ${scope.where} order by p.sort_order, p.name`,
+     where p.is_active=true and ${scope.where} order by p.sort_order, p.name`,
     scope.values
   );
   res.json(rows);
@@ -421,7 +422,7 @@ app.get("/api/portfolio/:id", auth, async (req, res) => {
   const { id } = req.params;
   const scope = await portfolioScope(req.user);
   const pRes = await pool.query(
-    `select p.*, g.name as group_name from products p left join groups g on g.id=p.group_id where p.id=$1 and (${scope.where})`,
+    `select p.*, g.name as group_name from products p left join groups g on g.id=p.group_id where p.id=$1 and p.is_active=true and (${scope.where})`,
     [id, ...scope.values]
   );
   if (!pRes.rows[0]) return res.status(403).json({ error: "Forbidden" });
@@ -446,12 +447,22 @@ app.put("/api/portfolio/:id", auth, requireRole("master", "bm"), async (req, res
   const { id } = req.params;
   const pRes = await pool.query("select group_id from products where id=$1", [id]);
   if (!pRes.rows[0] || !canEditProduct(req.user, pRes.rows[0].group_id)) return res.status(403).json({ error: "Forbidden" });
-  const { key_messages, positioning, patient_portraits, nrv_usd } = req.body;
+  const { name, key_messages, positioning, patient_portraits, nrv_usd, group_id } = req.body;
+  // only master may move a product to a different group
+  const newGroupId = req.user.role === "master" ? group_id : undefined;
   await pool.query(
-    `update products set key_messages=coalesce($1,key_messages), positioning=coalesce($2,positioning),
-     patient_portraits=coalesce($3,patient_portraits), nrv_usd=coalesce($4,nrv_usd), updated_at=now() where id=$5`,
-    [key_messages, positioning, patient_portraits, nrv_usd, id]
+    `update products set name=coalesce($1,name), key_messages=coalesce($2,key_messages), positioning=coalesce($3,positioning),
+     patient_portraits=coalesce($4,patient_portraits), nrv_usd=coalesce($5,nrv_usd), group_id=coalesce($6,group_id), updated_at=now() where id=$7`,
+    [name, key_messages, positioning, patient_portraits, nrv_usd, newGroupId, id]
   );
+  res.json({ ok: true });
+});
+
+app.delete("/api/portfolio/:id", auth, requireRole("master", "bm"), async (req, res) => {
+  const { id } = req.params;
+  const pRes = await pool.query("select group_id from products where id=$1", [id]);
+  if (!pRes.rows[0] || !canEditProduct(req.user, pRes.rows[0].group_id)) return res.status(403).json({ error: "Forbidden" });
+  await pool.query("update products set is_active=false, updated_at=now() where id=$1", [id]);
   res.json({ ok: true });
 });
 
@@ -537,7 +548,9 @@ const path = require("path");
 const FONT_REGULAR = path.join(__dirname, "fonts", "DejaVuSans.ttf");
 const FONT_BOLD = path.join(__dirname, "fonts", "DejaVuSans-Bold.ttf");
 
-function drawBrochurePage(doc, data) {
+const FILE_TYPE_LABEL_RU = { pil: "PIL (инструкция)", slides: "Слайды визуальной поддержки", other: "Материал" };
+
+function drawBrochurePage(doc, data, files) {
   doc.font(FONT_BOLD).fontSize(18).fillColor("#1F2937").text(data.product.name, { continued: false });
   doc.moveDown(0.3);
   doc.font(FONT_REGULAR).fontSize(10).fillColor("#6B7280").text(`Группа: ${data.product.group_name || "—"}   ·   Цена (NRV), $: ${Number(data.product.nrv_usd).toFixed(2)}`);
@@ -568,8 +581,62 @@ function drawBrochurePage(doc, data) {
       doc.fontSize(10).fillColor("#3FB88F").text(`Средняя цена конкурентов: $${data.avg_competitor_price_usd.toFixed(2)} (наша цена: $${Number(data.product.nrv_usd).toFixed(2)})`);
     }
   }
+
+  if (files && files.length > 0) {
+    doc.moveDown(1);
+    doc.font(FONT_BOLD).fontSize(12).fillColor("#C58A1F").text("Материалы");
+    doc.moveDown(0.2);
+    doc.font(FONT_REGULAR);
+    files.forEach((f) => {
+      const embedded = f.mime_type === "application/pdf";
+      const note = embedded ? "— страницы приложены далее" : `— формат ${f.mime_type.split("/")[1] || f.mime_type}, скачайте отдельно в системе`;
+      doc.fontSize(10).fillColor(embedded ? "#1F2937" : "#8493AA").text(`• ${FILE_TYPE_LABEL_RU[f.file_type] || f.file_type}: ${f.file_name} ${note}`);
+    });
+  }
+
   doc.moveDown(1);
   doc.fontSize(8).fillColor("#B71C1C").text(CONFIDENTIALITY_NOTICE, { width: 480 });
+}
+
+function collectPdfKitBuffer(doc) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+  });
+}
+
+// Builds one product's full brochure section as PDF bytes: the info card,
+// followed by the actual pages of every attached PDF file (PIL, slides, etc.)
+async function buildProductBrochureBuffer(productId) {
+  const data = await loadPortfolioDetail(productId);
+  const filesRes = await pool.query("select * from product_files where product_id=$1 order by created_at desc", [productId]);
+  const files = filesRes.rows;
+
+  const cardDoc = new PDFDocument({ margin: 50 });
+  const bufferPromise = collectPdfKitBuffer(cardDoc);
+  drawBrochurePage(cardDoc, data, files);
+  cardDoc.end();
+  const cardBuffer = await bufferPromise;
+
+  const merged = await PdfLibDocument.create();
+  const cardPdf = await PdfLibDocument.load(cardBuffer);
+  const cardPages = await merged.copyPages(cardPdf, cardPdf.getPageIndices());
+  cardPages.forEach((p) => merged.addPage(p));
+
+  for (const f of files) {
+    if (f.mime_type === "application/pdf") {
+      try {
+        const srcPdf = await PdfLibDocument.load(f.file_data, { ignoreEncryption: true });
+        const pages = await merged.copyPages(srcPdf, srcPdf.getPageIndices());
+        pages.forEach((p) => merged.addPage(p));
+      } catch (e) {
+        console.error(`Failed to merge PDF file #${f.id} into brochure:`, e.message);
+      }
+    }
+  }
+  return Buffer.from(await merged.save());
 }
 
 async function loadPortfolioDetail(productId) {
@@ -584,33 +651,39 @@ async function loadPortfolioDetail(productId) {
 app.get("/api/portfolio/:id/brochure.pdf", auth, async (req, res) => {
   const { id } = req.params;
   const scope = await portfolioScope(req.user);
-  const check = await pool.query(`select p.id from products p where p.id=$1 and (${scope.where})`, [id, ...scope.values]);
+  const check = await pool.query(`select p.id from products p where p.id=$1 and p.is_active=true and (${scope.where})`, [id, ...scope.values]);
   if (!check.rows[0]) return res.status(403).json({ error: "Forbidden" });
-  const data = await loadPortfolioDetail(id);
-  const doc = new PDFDocument({ margin: 50 });
+  const buffer = await buildProductBrochureBuffer(id);
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="portfolio_${id}.pdf"`);
-  doc.pipe(res);
-  drawBrochurePage(doc, data);
-  doc.end();
+  res.end(buffer);
 });
 
 app.get("/api/portfolio-brochure.pdf", auth, async (req, res) => {
   const scope = await portfolioScope(req.user);
-  const listRes = await pool.query(`select p.id from products p where ${scope.where} order by p.sort_order, p.name`, scope.values);
-  const doc = new PDFDocument({ margin: 50 });
+  const listRes = await pool.query(`select p.id from products p where p.is_active=true and ${scope.where} order by p.sort_order, p.name`, scope.values);
+
+  const merged = await PdfLibDocument.create();
+
+  const coverDoc = new PDFDocument({ margin: 50 });
+  const coverBufferPromise = collectPdfKitBuffer(coverDoc);
+  coverDoc.font(FONT_BOLD).fontSize(24).fillColor("#1F2937").text("PULSE — Портфолио препаратов", { align: "center" });
+  coverDoc.moveDown(2);
+  coverDoc.font(FONT_REGULAR).fontSize(9).fillColor("#B71C1C").text(CONFIDENTIALITY_NOTICE, { align: "center" });
+  coverDoc.end();
+  const coverPdf = await PdfLibDocument.load(await coverBufferPromise);
+  (await merged.copyPages(coverPdf, coverPdf.getPageIndices())).forEach((p) => merged.addPage(p));
+
+  for (const row of listRes.rows) {
+    const productBuffer = await buildProductBrochureBuffer(row.id);
+    const productPdf = await PdfLibDocument.load(productBuffer);
+    (await merged.copyPages(productPdf, productPdf.getPageIndices())).forEach((p) => merged.addPage(p));
+  }
+
+  const finalBuffer = Buffer.from(await merged.save());
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="PULSE_portfolio_brochure.pdf"`);
-  doc.pipe(res);
-  doc.font(FONT_BOLD).fontSize(24).fillColor("#1F2937").text("PULSE — Портфолио препаратов", { align: "center" });
-  doc.moveDown(2);
-  doc.font(FONT_REGULAR).fontSize(9).fillColor("#B71C1C").text(CONFIDENTIALITY_NOTICE, { align: "center" });
-  for (const row of listRes.rows) {
-    doc.addPage();
-    const data = await loadPortfolioDetail(row.id);
-    drawBrochurePage(doc, data);
-  }
-  doc.end();
+  res.end(finalBuffer);
 });
 
 /* ============================================================

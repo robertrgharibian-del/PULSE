@@ -298,6 +298,9 @@ create table if not exists product_competitors (
 );
 create index if not exists idx_product_competitors_product on product_competitors(product_id);
 
+-- migration 010 (kept in sync here for fresh installs — see migration_010.sql for existing DBs)
+alter table products add column if not exists is_active boolean not null default true;
+
 -- ============================================================
 -- SEED: product catalog (FY'27, MSN Rhythm + Prime)
 -- ============================================================
