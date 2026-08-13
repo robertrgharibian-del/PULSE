@@ -263,7 +263,7 @@ app.post("/api/users", auth, requireRole("master"), async (req, res) => {
 });
 
 app.patch("/api/users/:id", auth, requireRole("master"), async (req, res) => {
-  const { is_active, territory, rm_id, full_name, group_id, password } = req.body;
+  const { is_active, territory, rm_id, full_name, group_id, email, password } = req.body;
   const fields = [];
   const values = [];
   let i = 1;
@@ -274,6 +274,10 @@ app.patch("/api/users/:id", auth, requireRole("master"), async (req, res) => {
       values.push(v);
     }
   }
+  if (email !== undefined && email.trim()) {
+    fields.push(`email = $${i++}`);
+    values.push(email.trim().toLowerCase());
+  }
   if (password) {
     const hash = await bcrypt.hash(password, 10);
     fields.push(`password_hash = $${i++}`);
@@ -281,7 +285,12 @@ app.patch("/api/users/:id", auth, requireRole("master"), async (req, res) => {
   }
   if (!fields.length) return res.status(400).json({ error: "Нет полей для обновления" });
   values.push(req.params.id);
-  await pool.query(`update users set ${fields.join(", ")} where id = $${i}`, values);
+  try {
+    await pool.query(`update users set ${fields.join(", ")} where id = $${i}`, values);
+  } catch (e) {
+    if (e.code === "23505") return res.status(409).json({ error: "Такой email уже используется другим аккаунтом" });
+    throw e;
+  }
   if (password) {
     await pool.query("update password_reset_requests set status='resolved', resolved_at=now() where user_id=$1 and status='pending'", [req.params.id]);
   }

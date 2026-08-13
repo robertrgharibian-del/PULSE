@@ -143,14 +143,18 @@ function ResetRequests({ onResolved }) {
 
 function EditUserRow({ u, rms, territories, groups, onSaved }) {
   const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({ full_name: u.full_name, territory: u.territory || "", rm_id: u.rm_id || "", group_id: u.group_id || "" });
+  const [form, setForm] = useState({
+    full_name: u.full_name, email: u.email, password: "",
+    territory: u.territory || "", rm_id: u.rm_id || "", group_id: u.group_id || "",
+  });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function save() {
     setBusy(true); setError("");
     try {
-      const payload = { full_name: form.full_name };
+      const payload = { full_name: form.full_name, email: form.email };
+      if (form.password.trim()) payload.password = form.password.trim();
       if (u.role === "mp") { payload.territory = form.territory; payload.rm_id = form.rm_id; }
       if (u.role === "mp" || u.role === "bm") payload.group_id = form.group_id || null;
       await api.patchUser(u.id, payload);
@@ -176,23 +180,45 @@ function EditUserRow({ u, rms, territories, groups, onSaved }) {
       <tr style={{ borderTop: "1px solid #22304A", background: "#1B2A44" }}>
         <td colSpan={7} className="px-4 py-3">
           <div className="grid sm:grid-cols-2 gap-2 text-sm mb-2">
-            <input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} placeholder="Имя"
-              className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#3A4A66" }} />
+            <label className="flex flex-col gap-1">
+              <span className="text-xs" style={{ color: "#8493AA" }}>Имя</span>
+              <input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })}
+                className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#3A4A66" }} />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs" style={{ color: "#8493AA" }}>Email</span>
+              <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
+                className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#3A4A66" }} />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs" style={{ color: "#8493AA" }}>Новый пароль (необязательно)</span>
+              <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Оставьте пустым, чтобы не менять"
+                className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#3A4A66" }} />
+            </label>
             {u.role === "mp" && (
-              <select value={form.territory} onChange={(e) => setForm({ ...form, territory: e.target.value })} className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#3A4A66" }}>
-                {territories.map((t) => <option key={t.key} value={t.label} style={{ color: "#000" }}>{t.label}</option>)}
-              </select>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs" style={{ color: "#8493AA" }}>Территория</span>
+                <select value={form.territory} onChange={(e) => setForm({ ...form, territory: e.target.value })} className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#3A4A66" }}>
+                  {territories.map((t) => <option key={t.key} value={t.label} style={{ color: "#000" }}>{t.label}</option>)}
+                </select>
+              </label>
             )}
             {(u.role === "mp" || u.role === "bm") && (
-              <select value={form.group_id} onChange={(e) => setForm({ ...form, group_id: e.target.value })} className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#3A4A66" }}>
-                <option value="" style={{ color: "#000" }}>Без группы</option>
-                {groups.map((g) => <option key={g.id} value={g.id} style={{ color: "#000" }}>{g.name}</option>)}
-              </select>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs" style={{ color: "#8493AA" }}>Группа</span>
+                <select value={form.group_id} onChange={(e) => setForm({ ...form, group_id: e.target.value })} className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#3A4A66" }}>
+                  <option value="" style={{ color: "#000" }}>Без группы</option>
+                  {groups.map((g) => <option key={g.id} value={g.id} style={{ color: "#000" }}>{g.name}</option>)}
+                </select>
+              </label>
             )}
             {u.role === "mp" && (
-              <select value={form.rm_id} onChange={(e) => setForm({ ...form, rm_id: e.target.value })} className="bg-transparent border rounded px-2 py-1.5 sm:col-span-2" style={{ borderColor: "#3A4A66" }}>
-                {rms.map((rm) => <option key={rm.id} value={rm.id} style={{ color: "#000" }}>{rm.full_name}</option>)}
-              </select>
+              <label className="flex flex-col gap-1 sm:col-span-2">
+                <span className="text-xs" style={{ color: "#8493AA" }}>Региональный менеджер</span>
+                <select value={form.rm_id} onChange={(e) => setForm({ ...form, rm_id: e.target.value })} className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#3A4A66" }}>
+                  {rms.map((rm) => <option key={rm.id} value={rm.id} style={{ color: "#000" }}>{rm.full_name}</option>)}
+                </select>
+              </label>
             )}
           </div>
           {error && <div className="text-xs mb-2" style={{ color: "#E2574C" }}>{error}</div>}
