@@ -270,6 +270,34 @@ create table if not exists doctor_weekly_log (
 );
 create index if not exists idx_doctor_log_doctor on doctor_weekly_log(doctor_id, log_date);
 
+-- migration 009 (kept in sync here for fresh installs — see migration_009.sql for existing DBs) — PORTFOLIO
+alter table products add column if not exists key_messages text;
+alter table products add column if not exists positioning text;
+alter table products add column if not exists patient_portraits text;
+alter table products add column if not exists updated_at timestamptz not null default now();
+create table if not exists product_files (
+  id           bigserial primary key,
+  product_id   bigint not null references products(id) on delete cascade,
+  file_type    text not null check (file_type in ('pil','slides','other')),
+  file_name    text not null,
+  mime_type    text not null,
+  file_data    bytea not null,
+  uploaded_by  bigint not null references users(id),
+  created_at   timestamptz not null default now()
+);
+create index if not exists idx_product_files_product on product_files(product_id);
+create table if not exists product_competitors (
+  id                 bigserial primary key,
+  product_id         bigint not null references products(id) on delete cascade,
+  competitor_name    text not null,
+  is_direct          boolean not null default true,
+  competitor_price_usd numeric(10,2),
+  price_updated_at   timestamptz,
+  price_updated_by   bigint references users(id),
+  created_at         timestamptz not null default now()
+);
+create index if not exists idx_product_competitors_product on product_competitors(product_id);
+
 -- ============================================================
 -- SEED: product catalog (FY'27, MSN Rhythm + Prime)
 -- ============================================================
@@ -313,5 +341,5 @@ update products set group_id = (select id from groups where name='Prime')
 -- generate your own hash and update this row.
 -- ============================================================
 insert into users (email, password_hash, full_name, role)
-values ('admin@fss.local', '$2a$10$6tel61CW904PmIdyhAOZwuYRQ9F5zTyD4zvS/FI/hPGwcVickkoOe', 'Master Admin', 'master')
+values ('admin@fss.local', '$2b$10$0ec5JdSYxe3dQ1OCFAcMeu8axRzyiHzxbHU7B2uT3G7fvtr7U4wAG', 'Master Admin', 'master')
 on conflict (email) do nothing;

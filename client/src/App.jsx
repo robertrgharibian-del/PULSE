@@ -13,15 +13,16 @@ import Dashboard from "./pages/Dashboard.jsx";
 import Profile from "./pages/Profile.jsx";
 import BmReports from "./pages/BmReports.jsx";
 import DocTrackingList from "./pages/DocTrackingList.jsx";
+import PortfolioList from "./pages/PortfolioList.jsx";
 import RmBonusView from "./components/RmBonusView.jsx";
 
 const ROLE_LABEL = { master: "Мастер-аккаунт", rm: "Региональный менеджер", mp: "Медпредставитель", bm: "Бренд-менеджер" };
 
 const NAV = {
-  master: [["reports", "Отчёты"], ["users", "Пользователи"], ["imports", "Загрузка данных"], ["comments", "Комментарии"], ["dashboard", "Дашборд"], ["doctracking", "DOC TRACKING"], ["ai", "ИИ-рекомендации"], ["profile", "Профиль"]],
-  rm: [["team", "Команда"], ["myteam", "Моя команда"], ["bonus", "Мой бонус"], ["dashboard", "Дашборд"], ["doctracking", "DOC TRACKING"], ["ai", "ИИ-рекомендации"], ["profile", "Профиль"]],
-  mp: [["report", "Мой отчёт"], ["doctracking", "DOC TRACKING"], ["ai", "ИИ-рекомендации"], ["profile", "Профиль"]],
-  bm: [["reports", "Отчёты"], ["doctracking", "DOC TRACKING"], ["profile", "Профиль"]],
+  master: [["reports", "Отчёты"], ["users", "Пользователи"], ["imports", "Загрузка данных"], ["comments", "Комментарии"], ["dashboard", "Дашборд"], ["doctracking", "DOC TRACKING"], ["portfolio", "Портфолио"], ["ai", "ИИ-рекомендации"], ["profile", "Профиль"]],
+  rm: [["team", "Команда"], ["myteam", "Моя команда"], ["bonus", "Мой бонус"], ["dashboard", "Дашборд"], ["doctracking", "DOC TRACKING"], ["portfolio", "Портфолио"], ["ai", "ИИ-рекомендации"], ["profile", "Профиль"]],
+  mp: [["report", "Мой отчёт"], ["doctracking", "DOC TRACKING"], ["portfolio", "Портфолио"], ["ai", "ИИ-рекомендации"], ["profile", "Профиль"]],
+  bm: [["reports", "Отчёты"], ["doctracking", "DOC TRACKING"], ["portfolio", "Портфолио"], ["profile", "Профиль"]],
 };
 const DEFAULT_SECTION = { master: "reports", rm: "team", mp: "report", bm: "reports" };
 
@@ -85,6 +86,7 @@ export default function App() {
       {user.role === "master" && section === "comments" && <AllComments />}
       {user.role === "master" && section === "dashboard" && <Dashboard role="master" />}
       {user.role === "master" && section === "doctracking" && <DocTrackingList user={user} />}
+      {user.role === "master" && section === "portfolio" && <PortfolioList user={user} />}
       {user.role === "master" && section === "ai" && <AiInsights />}
       {user.role === "master" && section === "profile" && <Profile user={user} onUpdated={setUser} />}
 
@@ -93,16 +95,19 @@ export default function App() {
       {user.role === "rm" && section === "bonus" && <RmBonusView rmId={user.id} rmName={null} />}
       {user.role === "rm" && section === "dashboard" && <Dashboard role="rm" />}
       {user.role === "rm" && section === "doctracking" && <DocTrackingList user={user} />}
+      {user.role === "rm" && section === "portfolio" && <PortfolioList user={user} />}
       {user.role === "rm" && section === "ai" && <AiInsights />}
       {user.role === "rm" && section === "profile" && <Profile user={user} onUpdated={setUser} />}
 
       {user.role === "mp" && section === "report" && <MpPanel user={user} />}
       {user.role === "mp" && section === "doctracking" && <DocTrackingList user={user} />}
+      {user.role === "mp" && section === "portfolio" && <PortfolioList user={user} />}
       {user.role === "mp" && section === "ai" && <AiInsights />}
       {user.role === "mp" && section === "profile" && <Profile user={user} onUpdated={setUser} />}
 
       {user.role === "bm" && section === "reports" && <BmReports user={user} />}
       {user.role === "bm" && section === "doctracking" && <DocTrackingList user={user} />}
+      {user.role === "bm" && section === "portfolio" && <PortfolioList user={user} />}
       {user.role === "bm" && section === "profile" && <Profile user={user} onUpdated={setUser} />}
     </div>
   );

@@ -39,6 +39,26 @@ export const api = {
   addDoctorLog: (id, payload) => request(`/api/doc-tracking/doctors/${id}/log`, { method: "POST", body: payload }),
   deleteDoctorLog: (logId) => request(`/api/doc-tracking/log/${logId}`, { method: "DELETE" }),
 
+  listPortfolio: () => request("/api/portfolio"),
+  getPortfolioItem: (id) => request(`/api/portfolio/${id}`),
+  createPortfolioItem: (payload) => request("/api/portfolio", { method: "POST", body: payload }),
+  updatePortfolioItem: (id, payload) => request(`/api/portfolio/${id}`, { method: "PUT", body: payload }),
+  addCompetitor: (id, payload) => request(`/api/portfolio/${id}/competitors`, { method: "POST", body: payload }),
+  updateCompetitor: (cid, payload) => request(`/api/portfolio/competitors/${cid}`, { method: "PUT", body: payload }),
+  deleteCompetitor: (cid) => request(`/api/portfolio/competitors/${cid}`, { method: "DELETE" }),
+  deletePortfolioFile: (fileId) => request(`/api/portfolio/files/${fileId}`, { method: "DELETE" }),
+  uploadPortfolioFile: async (productId, fileType, file) => {
+    const fd = new FormData();
+    fd.append("file", file); fd.append("file_type", fileType);
+    const res = await fetch(`${BASE}/api/portfolio/${productId}/files`, { method: "POST", headers: authHeaders(), body: fd });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Ошибка загрузки файла");
+    return data;
+  },
+  portfolioFileUrl: (fileId) => `${BASE}/api/portfolio/files/${fileId}`,
+  portfolioBrochureUrl: (id) => `${BASE}/api/portfolio/${id}/brochure.pdf`,
+  portfolioAllBrochureUrl: () => `${BASE}/api/portfolio-brochure.pdf`,
+
   listProducts: () => request("/api/products"),
 
   listReports: (params = {}) => {

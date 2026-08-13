@@ -10,6 +10,7 @@ const PptxGenJS = require("pptxgenjs");
 const nodemailer = require("nodemailer");
 const { createEvents } = require("ics");
 const multer = require("multer");
+const PDFDocument = require("pdfkit");
 const cron = require("node-cron");
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 const { TERRITORIES, parseFssWorkbook, parseTargetsWorkbook, monthToCalendarYear } = require("./import.js");
@@ -363,6 +364,253 @@ app.post("/api/groups", auth, requireRole("master"), async (req, res) => {
     if (e.code === "23505") return res.status(409).json({ error: "Такая группа уже существует" });
     throw e;
   }
+});
+
+/* ============================================================
+   PORTFOLIO — product cards: PIL, visual-aid slides, key messages,
+   positioning, patient portraits, competitors (manual prices).
+   Visibility scoped by group; BM (own group) and Master can edit.
+   ============================================================ */
+const CONFIDENTIALITY_NOTICE =
+  "Информация, представленная в этом материале, является абсолютно конфиденциальной и не должна быть " +
+  "использована, продемонстрирована в любых случаях и ситуациях, кроме как внутри компании MSN Laboratories.";
+
+async function portfolioScope(user) {
+  if (user.role === "master") return { where: "1=1", values: [] };
+  if (user.role === "mp" || user.role === "bm") return { where: "p.group_id = $1", values: [user.group_id] };
+  if (user.role === "rm") {
+    return {
+      where: `p.group_id in (select distinct group_id from users where rm_id = $1 and group_id is not null)`,
+      values: [user.id],
+    };
+  }
+  return { where: "1=0", values: [] };
+}
+function canEditProduct(user, groupId) {
+  if (user.role === "master") return true;
+  if (user.role === "bm") return user.group_id === groupId;
+  return false;
+}
+
+app.get("/api/portfolio", auth, async (req, res) => {
+  const scope = await portfolioScope(req.user);
+  const { rows } = await pool.query(
+    `select p.id, p.name, p.nrv_usd, p.group_id, g.name as group_name,
+            (select count(*) from product_files f where f.product_id=p.id and f.file_type='pil') as pil_count,
+            (select count(*) from product_files f where f.product_id=p.id and f.file_type='slides') as slides_count
+     from products p left join groups g on g.id=p.group_id
+     where ${scope.where} order by p.sort_order, p.name`,
+    scope.values
+  );
+  res.json(rows);
+});
+
+app.post("/api/portfolio", auth, requireRole("master", "bm"), async (req, res) => {
+  const { name, nrv_usd, group_id } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: "Укажите название препарата" });
+  const gid = req.user.role === "bm" ? req.user.group_id : group_id;
+  if (!gid) return res.status(400).json({ error: "Укажите группу" });
+  const { rows } = await pool.query(
+    "insert into products (name, nrv_usd, group_id, sort_order) values ($1,$2,$3,999) returning *",
+    [name.trim(), nrv_usd || 0, gid]
+  );
+  res.json(rows[0]);
+});
+
+app.get("/api/portfolio/:id", auth, async (req, res) => {
+  const { id } = req.params;
+  const scope = await portfolioScope(req.user);
+  const pRes = await pool.query(
+    `select p.*, g.name as group_name from products p left join groups g on g.id=p.group_id where p.id=$1 and (${scope.where})`,
+    [id, ...scope.values]
+  );
+  if (!pRes.rows[0]) return res.status(403).json({ error: "Forbidden" });
+  const filesRes = await pool.query(
+    "select id, file_type, file_name, mime_type, created_at from product_files where product_id=$1 order by created_at desc",
+    [id]
+  );
+  const compRes = await pool.query("select * from product_competitors where product_id=$1 order by is_direct desc, competitor_name", [id]);
+  const prices = compRes.rows.filter((c) => c.competitor_price_usd != null).map((c) => Number(c.competitor_price_usd));
+  const avgCompetitorPrice = prices.length ? prices.reduce((s, x) => s + x, 0) / prices.length : null;
+
+  res.json({
+    product: pRes.rows[0],
+    files: filesRes.rows,
+    competitors: compRes.rows,
+    avg_competitor_price_usd: avgCompetitorPrice,
+    can_edit: canEditProduct(req.user, pRes.rows[0].group_id),
+  });
+});
+
+app.put("/api/portfolio/:id", auth, requireRole("master", "bm"), async (req, res) => {
+  const { id } = req.params;
+  const pRes = await pool.query("select group_id from products where id=$1", [id]);
+  if (!pRes.rows[0] || !canEditProduct(req.user, pRes.rows[0].group_id)) return res.status(403).json({ error: "Forbidden" });
+  const { key_messages, positioning, patient_portraits, nrv_usd } = req.body;
+  await pool.query(
+    `update products set key_messages=coalesce($1,key_messages), positioning=coalesce($2,positioning),
+     patient_portraits=coalesce($3,patient_portraits), nrv_usd=coalesce($4,nrv_usd), updated_at=now() where id=$5`,
+    [key_messages, positioning, patient_portraits, nrv_usd, id]
+  );
+  res.json({ ok: true });
+});
+
+app.post("/api/portfolio/:id/files", auth, requireRole("master", "bm"), upload.single("file"), async (req, res) => {
+  const { id } = req.params;
+  const pRes = await pool.query("select group_id from products where id=$1", [id]);
+  if (!pRes.rows[0] || !canEditProduct(req.user, pRes.rows[0].group_id)) return res.status(403).json({ error: "Forbidden" });
+  if (!req.file) return res.status(400).json({ error: "Файл не получен" });
+  const { file_type } = req.body;
+  if (!["pil", "slides", "other"].includes(file_type)) return res.status(400).json({ error: "Неверный тип файла" });
+  const { rows } = await pool.query(
+    "insert into product_files (product_id, file_type, file_name, mime_type, file_data, uploaded_by) values ($1,$2,$3,$4,$5,$6) returning id, file_type, file_name, mime_type, created_at",
+    [id, file_type, req.file.originalname, req.file.mimetype, req.file.buffer, req.user.id]
+  );
+  res.json(rows[0]);
+});
+
+app.get("/api/portfolio/files/:fileId", auth, async (req, res) => {
+  const { fileId } = req.params;
+  const scope = await portfolioScope(req.user);
+  const fRes = await pool.query(
+    `select f.*, p.group_id from product_files f join products p on p.id=f.product_id where f.id=$1 and (${scope.where})`,
+    [fileId, ...scope.values]
+  );
+  const file = fRes.rows[0];
+  if (!file) return res.status(403).json({ error: "Forbidden" });
+  res.setHeader("Content-Type", file.mime_type);
+  res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(file.file_name)}"`);
+  res.end(file.file_data);
+});
+
+app.delete("/api/portfolio/files/:fileId", auth, requireRole("master", "bm"), async (req, res) => {
+  const { fileId } = req.params;
+  const fRes = await pool.query(
+    `select f.id, p.group_id from product_files f join products p on p.id=f.product_id where f.id=$1`, [fileId]
+  );
+  if (!fRes.rows[0] || !canEditProduct(req.user, fRes.rows[0].group_id)) return res.status(403).json({ error: "Forbidden" });
+  await pool.query("delete from product_files where id=$1", [fileId]);
+  res.json({ ok: true });
+});
+
+app.post("/api/portfolio/:id/competitors", auth, requireRole("master", "bm"), async (req, res) => {
+  const { id } = req.params;
+  const pRes = await pool.query("select group_id from products where id=$1", [id]);
+  if (!pRes.rows[0] || !canEditProduct(req.user, pRes.rows[0].group_id)) return res.status(403).json({ error: "Forbidden" });
+  const { competitor_name, is_direct, competitor_price_usd } = req.body;
+  if (!competitor_name || !competitor_name.trim()) return res.status(400).json({ error: "Укажите название конкурента" });
+  const { rows } = await pool.query(
+    `insert into product_competitors (product_id, competitor_name, is_direct, competitor_price_usd, price_updated_at, price_updated_by)
+     values ($1,$2,$3,$4,$5,$6) returning *`,
+    [id, competitor_name.trim(), is_direct !== false, competitor_price_usd || null, competitor_price_usd != null ? new Date() : null, req.user.id]
+  );
+  res.json(rows[0]);
+});
+
+app.put("/api/portfolio/competitors/:cid", auth, requireRole("master", "bm"), async (req, res) => {
+  const { cid } = req.params;
+  const cRes = await pool.query(
+    `select c.id, p.group_id from product_competitors c join products p on p.id=c.product_id where c.id=$1`, [cid]
+  );
+  if (!cRes.rows[0] || !canEditProduct(req.user, cRes.rows[0].group_id)) return res.status(403).json({ error: "Forbidden" });
+  const { competitor_name, is_direct, competitor_price_usd } = req.body;
+  await pool.query(
+    `update product_competitors set competitor_name=coalesce($1,competitor_name), is_direct=coalesce($2,is_direct),
+     competitor_price_usd=$3, price_updated_at=now(), price_updated_by=$4 where id=$5`,
+    [competitor_name, is_direct, competitor_price_usd ?? null, req.user.id, cid]
+  );
+  res.json({ ok: true });
+});
+
+app.delete("/api/portfolio/competitors/:cid", auth, requireRole("master", "bm"), async (req, res) => {
+  const { cid } = req.params;
+  const cRes = await pool.query(
+    `select c.id, p.group_id from product_competitors c join products p on p.id=c.product_id where c.id=$1`, [cid]
+  );
+  if (!cRes.rows[0] || !canEditProduct(req.user, cRes.rows[0].group_id)) return res.status(403).json({ error: "Forbidden" });
+  await pool.query("delete from product_competitors where id=$1", [cid]);
+  res.json({ ok: true });
+});
+
+/* ---- PDF brochure (single product or whole visible portfolio) ---- */
+const path = require("path");
+const FONT_REGULAR = path.join(__dirname, "fonts", "DejaVuSans.ttf");
+const FONT_BOLD = path.join(__dirname, "fonts", "DejaVuSans-Bold.ttf");
+
+function drawBrochurePage(doc, data) {
+  doc.font(FONT_BOLD).fontSize(18).fillColor("#1F2937").text(data.product.name, { continued: false });
+  doc.moveDown(0.3);
+  doc.font(FONT_REGULAR).fontSize(10).fillColor("#6B7280").text(`Группа: ${data.product.group_name || "—"}   ·   Цена (NRV), $: ${Number(data.product.nrv_usd).toFixed(2)}`);
+  doc.moveDown(1);
+
+  const section = (title, text) => {
+    doc.font(FONT_BOLD).fontSize(12).fillColor("#C58A1F").text(title);
+    doc.moveDown(0.2);
+    doc.font(FONT_REGULAR).fontSize(10).fillColor("#1F2937").text(text || "—", { width: 480 });
+    doc.moveDown(0.8);
+  };
+  section("Ключевые сообщения", data.product.key_messages);
+  section("Позиционирование", data.product.positioning);
+  section("Портреты пациентов", data.product.patient_portraits);
+
+  doc.font(FONT_BOLD).fontSize(12).fillColor("#C58A1F").text("Конкуренты");
+  doc.moveDown(0.2);
+  doc.font(FONT_REGULAR);
+  if (data.competitors.length === 0) {
+    doc.fontSize(10).fillColor("#1F2937").text("—");
+  } else {
+    data.competitors.forEach((c) => {
+      const price = c.competitor_price_usd != null ? `$${Number(c.competitor_price_usd).toFixed(2)}` : "цена не указана";
+      doc.fontSize(10).fillColor("#1F2937").text(`• ${c.competitor_name} (${c.is_direct ? "прямой" : "непрямой"}) — ${price}`);
+    });
+    if (data.avg_competitor_price_usd != null) {
+      doc.moveDown(0.3);
+      doc.fontSize(10).fillColor("#3FB88F").text(`Средняя цена конкурентов: $${data.avg_competitor_price_usd.toFixed(2)} (наша цена: $${Number(data.product.nrv_usd).toFixed(2)})`);
+    }
+  }
+  doc.moveDown(1);
+  doc.fontSize(8).fillColor("#B71C1C").text(CONFIDENTIALITY_NOTICE, { width: 480 });
+}
+
+async function loadPortfolioDetail(productId) {
+  const pRes = await pool.query(`select p.*, g.name as group_name from products p left join groups g on g.id=p.group_id where p.id=$1`, [productId]);
+  if (!pRes.rows[0]) return null;
+  const compRes = await pool.query("select * from product_competitors where product_id=$1 order by is_direct desc, competitor_name", [productId]);
+  const prices = compRes.rows.filter((c) => c.competitor_price_usd != null).map((c) => Number(c.competitor_price_usd));
+  const avg = prices.length ? prices.reduce((s, x) => s + x, 0) / prices.length : null;
+  return { product: pRes.rows[0], competitors: compRes.rows, avg_competitor_price_usd: avg };
+}
+
+app.get("/api/portfolio/:id/brochure.pdf", auth, async (req, res) => {
+  const { id } = req.params;
+  const scope = await portfolioScope(req.user);
+  const check = await pool.query(`select p.id from products p where p.id=$1 and (${scope.where})`, [id, ...scope.values]);
+  if (!check.rows[0]) return res.status(403).json({ error: "Forbidden" });
+  const data = await loadPortfolioDetail(id);
+  const doc = new PDFDocument({ margin: 50 });
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="portfolio_${id}.pdf"`);
+  doc.pipe(res);
+  drawBrochurePage(doc, data);
+  doc.end();
+});
+
+app.get("/api/portfolio-brochure.pdf", auth, async (req, res) => {
+  const scope = await portfolioScope(req.user);
+  const listRes = await pool.query(`select p.id from products p where ${scope.where} order by p.sort_order, p.name`, scope.values);
+  const doc = new PDFDocument({ margin: 50 });
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="PULSE_portfolio_brochure.pdf"`);
+  doc.pipe(res);
+  doc.font(FONT_BOLD).fontSize(24).fillColor("#1F2937").text("PULSE — Портфолио препаратов", { align: "center" });
+  doc.moveDown(2);
+  doc.font(FONT_REGULAR).fontSize(9).fillColor("#B71C1C").text(CONFIDENTIALITY_NOTICE, { align: "center" });
+  for (const row of listRes.rows) {
+    doc.addPage();
+    const data = await loadPortfolioDetail(row.id);
+    drawBrochurePage(doc, data);
+  }
+  doc.end();
 });
 
 /* ============================================================
