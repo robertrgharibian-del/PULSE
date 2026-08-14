@@ -989,6 +989,169 @@ app.get("/api/portfolio-brochure.pdf", auth, async (req, res) => {
 });
 
 /* ============================================================
+   MARKETING EVENTS & ACTIVITIES — BM defines typed templates per
+   group (bilingual name + monthly/quarterly target); MPs in that
+   group plan instances up to 3 months ahead and later report the
+   actual result. Same workflow for "event" and "activity" kinds.
+   ============================================================ */
+async function activityTypeScope(user) {
+  if (user.role === "master") return { where: "1=1", values: [] };
+  if (user.role === "mp" || user.role === "bm") return { where: "t.group_id = $1", values: [user.group_id] };
+  if (user.role === "rm") {
+    return { where: `t.group_id in (select distinct group_id from users where rm_id = $1 and group_id is not null)`, values: [user.id] };
+  }
+  return { where: "1=0", values: [] };
+}
+async function activityEntryScope(user) {
+  if (user.role === "master") return { where: "1=1", values: [] };
+  if (user.role === "mp") return { where: "e.mp_id = $1", values: [user.id] };
+  if (user.role === "rm") return { where: "mp.rm_id = $1", values: [user.id] };
+  if (user.role === "bm") return { where: "mp.group_id = $1", values: [user.group_id] };
+  return { where: "1=0", values: [] };
+}
+function canEditActivityType(user, groupId) {
+  if (user.role === "master") return true;
+  if (user.role === "bm") return user.group_id === groupId;
+  return false;
+}
+
+app.get("/api/activity-types", auth, async (req, res) => {
+  const { category } = req.query;
+  const scope = await activityTypeScope(req.user);
+  const params = [...scope.values];
+  let where = `t.is_active=true and (${scope.where})`;
+  if (category) { params.push(category); where += ` and t.category = $${params.length}`; }
+  const { rows } = await pool.query(
+    `select t.*, g.name as group_name from activity_types t join groups g on g.id=t.group_id where ${where} order by t.name`,
+    params
+  );
+  res.json(rows);
+});
+
+app.post("/api/activity-types", auth, requireRole("master", "bm"), async (req, res) => {
+  const { category, name, name_uz, monthly_target, quarterly_target, group_id } = req.body;
+  if (!["event", "activity"].includes(category)) return res.status(400).json({ error: "Неверная категория" });
+  if (!name || !name.trim()) return res.status(400).json({ error: "Укажите название" });
+  const gid = req.user.role === "bm" ? req.user.group_id : group_id;
+  if (!gid) return res.status(400).json({ error: "Укажите группу" });
+  const { rows } = await pool.query(
+    `insert into activity_types (group_id, category, name, name_uz, monthly_target, quarterly_target, created_by)
+     values ($1,$2,$3,$4,$5,$6,$7) returning *`,
+    [gid, category, name.trim(), name_uz || null, monthly_target || 0, quarterly_target || 0, req.user.id]
+  );
+  res.json(rows[0]);
+});
+
+app.put("/api/activity-types/:id", auth, requireRole("master", "bm"), async (req, res) => {
+  const { id } = req.params;
+  const tRes = await pool.query("select group_id from activity_types where id=$1", [id]);
+  if (!tRes.rows[0] || !canEditActivityType(req.user, tRes.rows[0].group_id)) return res.status(403).json({ error: "Forbidden" });
+  const { name, name_uz, monthly_target, quarterly_target } = req.body;
+  await pool.query(
+    `update activity_types set name=coalesce($1,name), name_uz=coalesce($2,name_uz),
+     monthly_target=coalesce($3,monthly_target), quarterly_target=coalesce($4,quarterly_target) where id=$5`,
+    [name, name_uz, monthly_target, quarterly_target, id]
+  );
+  res.json({ ok: true });
+});
+
+app.delete("/api/activity-types/:id", auth, requireRole("master", "bm"), async (req, res) => {
+  const { id } = req.params;
+  const tRes = await pool.query("select group_id from activity_types where id=$1", [id]);
+  if (!tRes.rows[0] || !canEditActivityType(req.user, tRes.rows[0].group_id)) return res.status(403).json({ error: "Forbidden" });
+  await pool.query("update activity_types set is_active=false where id=$1", [id]);
+  res.json({ ok: true });
+});
+
+app.get("/api/activity-entries", auth, async (req, res) => {
+  const { category, mp_id, year, month } = req.query;
+  const scope = await activityEntryScope(req.user);
+  const params = [...scope.values];
+  let where = `(${scope.where})`;
+  if (category) { params.push(category); where += ` and t.category = $${params.length}`; }
+  if (mp_id) { params.push(mp_id); where += ` and e.mp_id = $${params.length}`; }
+  if (year) { params.push(year); where += ` and e.period_year = $${params.length}`; }
+  if (month) { params.push(month); where += ` and e.period_month = $${params.length}`; }
+  const { rows } = await pool.query(
+    `select e.*, t.name as type_name, t.name_uz as type_name_uz, t.category as kind_category, mp.full_name as mp_name
+     from activity_entries e
+     join activity_types t on t.id = e.activity_type_id
+     join users mp on mp.id = e.mp_id
+     where ${where}
+     order by e.planned_date desc`,
+    params
+  );
+  res.json(rows);
+});
+
+app.post("/api/activity-entries", auth, requireRole("mp"), async (req, res) => {
+  const { activity_type_id, planned_date, city, venue, participants_count, participant_names, comments } = req.body;
+  if (!activity_type_id || !planned_date) return res.status(400).json({ error: "Укажите тип и дату" });
+  const d = new Date(planned_date);
+  const { rows } = await pool.query(
+    `insert into activity_entries (activity_type_id, mp_id, period_year, period_month, planned_date, city, venue, participants_count, participant_names, comments)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *`,
+    [activity_type_id, req.user.id, d.getFullYear(), d.getMonth() + 1, planned_date, city || null, venue || null, participants_count || null, participant_names || null, comments || null]
+  );
+  res.json(rows[0]);
+});
+
+app.put("/api/activity-entries/:id", auth, requireRole("mp"), async (req, res) => {
+  const { id } = req.params;
+  const check = await pool.query("select mp_id from activity_entries where id=$1", [id]);
+  if (!check.rows[0] || check.rows[0].mp_id !== req.user.id) return res.status(403).json({ error: "Forbidden" });
+  const { planned_date, city, venue, participants_count, participant_names, comments,
+          actual_date, actual_participants_count, actual_participant_names, actual_comments, status } = req.body;
+  await pool.query(
+    `update activity_entries set
+       planned_date=coalesce($1,planned_date), city=coalesce($2,city), venue=coalesce($3,venue),
+       participants_count=coalesce($4,participants_count), participant_names=coalesce($5,participant_names), comments=coalesce($6,comments),
+       actual_date=coalesce($7,actual_date), actual_participants_count=coalesce($8,actual_participants_count),
+       actual_participant_names=coalesce($9,actual_participant_names), actual_comments=coalesce($10,actual_comments),
+       status=coalesce($11,status)
+     where id=$12`,
+    [planned_date, city, venue, participants_count, participant_names, comments,
+     actual_date, actual_participants_count, actual_participant_names, actual_comments, status, id]
+  );
+  res.json({ ok: true });
+});
+
+app.delete("/api/activity-entries/:id", auth, requireRole("mp"), async (req, res) => {
+  const { id } = req.params;
+  const check = await pool.query("select mp_id, status from activity_entries where id=$1", [id]);
+  if (!check.rows[0] || check.rows[0].mp_id !== req.user.id) return res.status(403).json({ error: "Forbidden" });
+  if (check.rows[0].status === "completed") return res.status(400).json({ error: "Нельзя удалить уже завершённую запись" });
+  await pool.query("delete from activity_entries where id=$1", [id]);
+  res.json({ ok: true });
+});
+
+// Auto-generated monthly report: planned vs completed count per type + achievement %
+app.get("/api/activity-report", auth, async (req, res) => {
+  const { year, month, mp_id } = req.query;
+  if (!year || !month) return res.status(400).json({ error: "Укажите год и месяц" });
+  const scope = await activityEntryScope(req.user);
+  const params = [...scope.values, year, month];
+  let where = `(${scope.where}) and e.period_year=$${params.length - 1} and e.period_month=$${params.length}`;
+  if (mp_id) { params.push(mp_id); where += ` and e.mp_id=$${params.length}`; }
+  const { rows } = await pool.query(
+    `select e.*, t.name as type_name, t.name_uz as type_name_uz, t.category as kind_category, t.monthly_target, mp.full_name as mp_name
+     from activity_entries e join activity_types t on t.id=e.activity_type_id join users mp on mp.id=e.mp_id
+     where ${where}`,
+    params
+  );
+  const byType = {};
+  for (const r of rows) {
+    const key = r.activity_type_id;
+    byType[key] ||= { type_name: r.type_name, type_name_uz: r.type_name_uz, category: r.kind_category, monthly_target: r.monthly_target, planned: 0, completed: 0, entries: [] };
+    byType[key].planned += 1;
+    if (r.status === "completed") byType[key].completed += 1;
+    byType[key].entries.push(r);
+  }
+  const summary = Object.values(byType).map((t) => ({ ...t, achievement: t.monthly_target ? t.completed / t.monthly_target : null }));
+  res.json({ summary, entries: rows });
+});
+
+/* ============================================================
    BULK IMPORT — master uploads the monthly FSS workbook or the
    annual Target workbook; data is distributed to MPs by territory.
    ============================================================ */

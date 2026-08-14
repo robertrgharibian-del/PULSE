@@ -350,6 +350,42 @@ create index if not exists idx_scientific_info_product on product_scientific_inf
 alter table users add column if not exists photo_data bytea;
 alter table users add column if not exists photo_mime text;
 
+-- migration 012 (kept in sync here for fresh installs — see migration_012.sql for existing DBs)
+create table if not exists activity_types (
+  id              bigserial primary key,
+  group_id        bigint not null references groups(id),
+  category        text not null check (category in ('event','activity')),
+  name            text not null,
+  name_uz         text,
+  monthly_target  int not null default 0,
+  quarterly_target int not null default 0,
+  is_active       boolean not null default true,
+  created_by      bigint not null references users(id),
+  created_at      timestamptz not null default now()
+);
+create index if not exists idx_activity_types_group on activity_types(group_id, category);
+create table if not exists activity_entries (
+  id                       bigserial primary key,
+  activity_type_id         bigint not null references activity_types(id) on delete cascade,
+  mp_id                    bigint not null references users(id),
+  period_year              int not null,
+  period_month             int not null check (period_month between 1 and 12),
+  planned_date             date,
+  city                     text,
+  venue                    text,
+  participants_count       int,
+  participant_names        text,
+  comments                 text,
+  status                   text not null default 'planned' check (status in ('planned','completed')),
+  actual_date              date,
+  actual_participants_count int,
+  actual_participant_names text,
+  actual_comments          text,
+  created_at               timestamptz not null default now()
+);
+create index if not exists idx_activity_entries_mp on activity_entries(mp_id, period_year, period_month);
+create index if not exists idx_activity_entries_type on activity_entries(activity_type_id);
+
 -- ============================================================
 -- SEED: product catalog (FY'27, MSN Rhythm + Prime)
 -- ============================================================

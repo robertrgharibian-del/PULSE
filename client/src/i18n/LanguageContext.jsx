@@ -11,8 +11,12 @@ export function LanguageProvider({ children }) {
     localStorage.setItem("pulse_lang", l);
   }, []);
 
-  const t = useCallback((key) => {
-    return translations[lang]?.[key] ?? translations.ru?.[key] ?? key;
+  const t = useCallback((key, params) => {
+    let str = translations[lang]?.[key] ?? translations.ru?.[key] ?? key;
+    if (params) {
+      for (const [k, v] of Object.entries(params)) str = str.replaceAll(`{{${k}}}`, v);
+    }
+    return str;
   }, [lang]);
 
   return (

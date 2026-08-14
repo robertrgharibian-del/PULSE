@@ -98,6 +98,16 @@ export const api = {
     return uploadWithProgress(`${BASE}/api/users/${userId}/photo`, fd, onProgress);
   },
   userPhotoUrl: (userId) => `${BASE}/api/users/${userId}/photo?token=${localStorage.getItem("fss_token")}`,
+
+  listActivityTypes: (category) => request(`/api/activity-types?category=${category}`),
+  createActivityType: (payload) => request("/api/activity-types", { method: "POST", body: payload }),
+  updateActivityType: (id, payload) => request(`/api/activity-types/${id}`, { method: "PUT", body: payload }),
+  deleteActivityType: (id) => request(`/api/activity-types/${id}`, { method: "DELETE" }),
+  listActivityEntries: (params) => request(`/api/activity-entries?${new URLSearchParams(params).toString()}`),
+  createActivityEntry: (payload) => request("/api/activity-entries", { method: "POST", body: payload }),
+  updateActivityEntry: (id, payload) => request(`/api/activity-entries/${id}`, { method: "PUT", body: payload }),
+  deleteActivityEntry: (id) => request(`/api/activity-entries/${id}`, { method: "DELETE" }),
+  activityReport: (params) => request(`/api/activity-report?${new URLSearchParams(params).toString()}`),
   uploadPortfolioFile: (productId, fileType, file, onProgress) => {
     const fd = new FormData();
     fd.append("file", file); fd.append("file_type", fileType);

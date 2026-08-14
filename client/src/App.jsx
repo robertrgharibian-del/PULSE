@@ -15,14 +15,15 @@ import Profile from "./pages/Profile.jsx";
 import BmReports from "./pages/BmReports.jsx";
 import DocTrackingList from "./pages/DocTrackingList.jsx";
 import PortfolioList from "./pages/PortfolioList.jsx";
+import ActivitiesPage from "./pages/ActivitiesPage.jsx";
 import RmBonusView from "./components/RmBonusView.jsx";
 import Avatar from "./components/Avatar.jsx";
 
 const NAV = {
-  master: [["reports", "nav.reports"], ["users", "nav.users"], ["imports", "nav.imports"], ["comments", "nav.comments"], ["dashboard", "nav.dashboard"], ["doctracking", "nav.doctracking"], ["portfolio", "nav.portfolio"], ["ai", "nav.ai"], ["profile", "nav.profile"]],
-  rm: [["team", "nav.team"], ["myteam", "nav.myteam"], ["bonus", "nav.bonus"], ["dashboard", "nav.dashboard"], ["doctracking", "nav.doctracking"], ["portfolio", "nav.portfolio"], ["ai", "nav.ai"], ["profile", "nav.profile"]],
-  mp: [["report", "nav.myreport"], ["doctracking", "nav.doctracking"], ["portfolio", "nav.portfolio"], ["ai", "nav.ai"], ["profile", "nav.profile"]],
-  bm: [["reports", "nav.reports"], ["doctracking", "nav.doctracking"], ["portfolio", "nav.portfolio"], ["profile", "nav.profile"]],
+  master: [["reports", "nav.reports"], ["users", "nav.users"], ["imports", "nav.imports"], ["comments", "nav.comments"], ["dashboard", "nav.dashboard"], ["doctracking", "nav.doctracking"], ["portfolio", "nav.portfolio"], ["events", "nav.events"], ["activities", "nav.activities"], ["ai", "nav.ai"], ["profile", "nav.profile"]],
+  rm: [["team", "nav.team"], ["myteam", "nav.myteam"], ["bonus", "nav.bonus"], ["dashboard", "nav.dashboard"], ["doctracking", "nav.doctracking"], ["portfolio", "nav.portfolio"], ["events", "nav.events"], ["activities", "nav.activities"], ["ai", "nav.ai"], ["profile", "nav.profile"]],
+  mp: [["report", "nav.myreport"], ["doctracking", "nav.doctracking"], ["portfolio", "nav.portfolio"], ["events", "nav.events"], ["activities", "nav.activities"], ["ai", "nav.ai"], ["profile", "nav.profile"]],
+  bm: [["reports", "nav.reports"], ["doctracking", "nav.doctracking"], ["portfolio", "nav.portfolio"], ["events", "nav.events"], ["activities", "nav.activities"], ["profile", "nav.profile"]],
 };
 const DEFAULT_SECTION = { master: "reports", rm: "team", mp: "report", bm: "reports" };
 
@@ -103,6 +104,8 @@ export default function App() {
       {user.role === "master" && section === "dashboard" && <Dashboard role="master" />}
       {user.role === "master" && section === "doctracking" && <DocTrackingList user={user} />}
       {user.role === "master" && section === "portfolio" && <PortfolioList user={user} />}
+      {user.role === "master" && section === "events" && <ActivitiesPage user={user} category="event" />}
+      {user.role === "master" && section === "activities" && <ActivitiesPage user={user} category="activity" />}
       {user.role === "master" && section === "ai" && <AiInsights />}
       {user.role === "master" && section === "profile" && <Profile user={user} onUpdated={setUser} />}
 
@@ -112,18 +115,24 @@ export default function App() {
       {user.role === "rm" && section === "dashboard" && <Dashboard role="rm" />}
       {user.role === "rm" && section === "doctracking" && <DocTrackingList user={user} />}
       {user.role === "rm" && section === "portfolio" && <PortfolioList user={user} />}
+      {user.role === "rm" && section === "events" && <ActivitiesPage user={user} category="event" />}
+      {user.role === "rm" && section === "activities" && <ActivitiesPage user={user} category="activity" />}
       {user.role === "rm" && section === "ai" && <AiInsights />}
       {user.role === "rm" && section === "profile" && <Profile user={user} onUpdated={setUser} />}
 
       {user.role === "mp" && section === "report" && <MpPanel user={user} />}
       {user.role === "mp" && section === "doctracking" && <DocTrackingList user={user} />}
       {user.role === "mp" && section === "portfolio" && <PortfolioList user={user} />}
+      {user.role === "mp" && section === "events" && <ActivitiesPage user={user} category="event" />}
+      {user.role === "mp" && section === "activities" && <ActivitiesPage user={user} category="activity" />}
       {user.role === "mp" && section === "ai" && <AiInsights />}
       {user.role === "mp" && section === "profile" && <Profile user={user} onUpdated={setUser} />}
 
       {user.role === "bm" && section === "reports" && <BmReports user={user} />}
       {user.role === "bm" && section === "doctracking" && <DocTrackingList user={user} />}
       {user.role === "bm" && section === "portfolio" && <PortfolioList user={user} />}
+      {user.role === "bm" && section === "events" && <ActivitiesPage user={user} category="event" />}
+      {user.role === "bm" && section === "activities" && <ActivitiesPage user={user} category="activity" />}
       {user.role === "bm" && section === "profile" && <Profile user={user} onUpdated={setUser} />}
     </div>
   );
