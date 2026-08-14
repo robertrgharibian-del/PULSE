@@ -133,10 +133,13 @@ async function buildAnalyticsContext(pool, { mpIds, label }) {
   };
 }
 
+const NO_DASH_RULE = "Никогда не используй длинное тире (—) или короткое тире (–) — только обычный дефис (-) или перестрой предложение. Не используй markdown-разметку.";
+
 async function callClaude(context) {
   const system = `Ты — senior аналитик фармацевтических продаж (field force effectiveness) для команды медпредставителей в Узбекистане.
 Тебе дают структурированные данные по вторичным продажам (FSS): план/факт по месяцам, кварталам, годам, в долларах, плюс FFE score, плюс комментарии медпредов о причинах невыполнения.
 Дай ГЛУБОКИЙ анализ: тренды месяц-к-месяцу, квартал-к-кварталу, год-к-году, аномалии, риски, сильные и слабые препараты/территории.
+${NO_DASH_RULE}
 Отвечай СТРОГО в формате JSON (без markdown-разметки, без \`\`\`), на русском языке, со следующей структурой:
 {
   "summary": "2-4 предложения — главный вывод",
@@ -175,4 +178,45 @@ async function callClaude(context) {
   }
 }
 
-module.exports = { aiEnabled, AI_MODEL, buildAnalyticsContext, callClaude };
+/**
+ * NAVI — pre-visit coaching. Analyzes a doctor's profile, which portfolio
+ * products they already prescribe, and the full history of past visits
+ * (NAVI's prior recommendations + what the MP actually reported), and
+ * returns realistic, concrete tactics for today's visit. Responds in the
+ * MP's current UI language (ru/uz) — no separate setup needed.
+ */
+async function callClaudeForNavi(context, lang) {
+  const langName = lang === "uz" ? "узбекском (o'zbek tili, латиница)" : "русском";
+  const system = `Ты — NAVI, опытный полевой ИИ-коуч для медицинских представителей фармацевтической компании MSN в Узбекистане.
+Тебе дают карточку врача (специальность, стаж, психотип, сколько времени обычно даёт на визит, потребности, особенности поведения),
+список наших препаратов, которые врач уже назначает, и полную историю прошлых визитов (что советовала NAVI и что реально сделал МП).
+Проанализируй прогресс от визита к визиту и дай КОНКРЕТНЫЕ, реалистичные, применимые на практике рекомендации для сегодняшнего визита:
+как начать разговор, на что сделать акцент с учётом психотипа и потребностей врача, какие препараты и аргументы использовать, чего избегать,
+как уложиться в отведённое время визита, и конкретный следующий шаг.
+Отвечай ТОЛЬКО на ${langName} языке, простым связным текстом (без JSON, без markdown, без списков с звёздочками — обычные абзацы, при необходимости — короткие пронумерованные пункты).
+${NO_DASH_RULE}
+Объём — примерно 150-300 слов, по существу, без общих фраз.`;
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": process.env.ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: AI_MODEL,
+      max_tokens: 1200,
+      system,
+      messages: [{ role: "user", content: JSON.stringify(context) }],
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Anthropic API error ${res.status}: ${text.slice(0, 300)}`);
+  }
+  const data = await res.json();
+  return (data.content || []).map((b) => b.text || "").join("").trim();
+}
+
+module.exports = { aiEnabled, AI_MODEL, buildAnalyticsContext, callClaude, callClaudeForNavi };

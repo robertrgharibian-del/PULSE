@@ -15,7 +15,7 @@ const { PDFDocument: PdfLibDocument } = require("pdf-lib");
 const cron = require("node-cron");
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 const { TERRITORIES, parseFssWorkbook, parseTargetsWorkbook, monthToCalendarYear } = require("./import.js");
-const { aiEnabled, AI_MODEL, buildAnalyticsContext, callClaude } = require("./ai.js");
+const { aiEnabled, AI_MODEL, buildAnalyticsContext, callClaude, callClaudeForNavi } = require("./ai.js");
 
 const app = express();
 app.use(cors({ origin: process.env.CLIENT_URL || "*" }));
@@ -980,6 +980,158 @@ app.get("/api/portfolio-brochure.pdf", auth, async (req, res) => {
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="PULSE_portfolio_brochure.pdf"`);
   res.end(finalBuffer);
+});
+
+/* ============================================================
+   NAVI — AI visit-prep assistant. MP maintains a doctor card;
+   NAVI analyzes the profile + full visit history and gives
+   concrete tactics for today's visit, in the MP's current UI
+   language. No setup needed by the MP — same server-side
+   ANTHROPIC_API_KEY as the "NAVI" analytics tab.
+   ============================================================ */
+async function naviDoctorScope(user) {
+  if (user.role === "master") return { where: "1=1", values: [] };
+  if (user.role === "mp") return { where: "d.mp_id = $1", values: [user.id] };
+  if (user.role === "rm") return { where: "mp.rm_id = $1", values: [user.id] };
+  if (user.role === "bm") return { where: "mp.group_id = $1", values: [user.group_id] };
+  return { where: "1=0", values: [] };
+}
+
+app.get("/api/navi/doctors", auth, async (req, res) => {
+  const { search } = req.query;
+  const scope = await naviDoctorScope(req.user);
+  const params = [...scope.values];
+  let where = `(${scope.where})`;
+  if (search && search.trim()) {
+    params.push(`%${search.trim().toLowerCase()}%`);
+    where += ` and (lower(d.last_name) like $${params.length} or lower(coalesce(d.first_name,'')) like $${params.length} or lower(coalesce(d.lpu,'')) like $${params.length} or lower(coalesce(d.city,'')) like $${params.length})`;
+  }
+  const { rows } = await pool.query(
+    `select d.*, mp.full_name as mp_name,
+            (select count(*) from navi_visits v where v.doctor_id=d.id) as visit_count
+     from navi_doctors d join users mp on mp.id=d.mp_id
+     where ${where} order by d.last_name`,
+    params
+  );
+  res.json(rows);
+});
+
+app.post("/api/navi/doctors", auth, requireRole("mp"), async (req, res) => {
+  const { last_name, first_name, patronymic, city, lpu, specialty, experience_years, psychotype, visit_minutes, needs, behavior, products } = req.body;
+  if (!last_name || !last_name.trim()) return res.status(400).json({ error: "Укажите фамилию врача" });
+  const { rows } = await pool.query(
+    `insert into navi_doctors (mp_id, last_name, first_name, patronymic, city, lpu, specialty, experience_years, psychotype, visit_minutes, needs, behavior)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`,
+    [req.user.id, last_name.trim(), first_name || "", patronymic || "", city || "", lpu || "", specialty || "", experience_years || null, psychotype || "", visit_minutes || null, needs || "", behavior || ""]
+  );
+  const doctor = rows[0];
+  for (const p of (products || [])) {
+    if (!p.product_id) continue;
+    await pool.query("insert into navi_doctor_products (doctor_id, product_id, prescriptions) values ($1,$2,$3)", [doctor.id, p.product_id, p.prescriptions || 0]);
+  }
+  res.json(doctor);
+});
+
+async function canAccessNaviDoctor(user, doctorId) {
+  const r = await pool.query(`select d.mp_id, mp.rm_id, mp.group_id from navi_doctors d join users mp on mp.id=d.mp_id where d.id=$1`, [doctorId]);
+  const row = r.rows[0];
+  if (!row) return false;
+  if (user.role === "master") return true;
+  if (user.role === "mp") return row.mp_id === user.id;
+  if (user.role === "rm") return row.rm_id === user.id;
+  if (user.role === "bm") return row.group_id === user.group_id;
+  return false;
+}
+
+app.get("/api/navi/doctors/:id", auth, async (req, res) => {
+  const { id } = req.params;
+  if (!(await canAccessNaviDoctor(req.user, id))) return res.status(403).json({ error: "Forbidden" });
+  const dRes = await pool.query(`select d.*, mp.full_name as mp_name from navi_doctors d join users mp on mp.id=d.mp_id where d.id=$1`, [id]);
+  const productsRes = await pool.query(
+    `select dp.*, p.name as product_name from navi_doctor_products dp join products p on p.id=dp.product_id where dp.doctor_id=$1`, [id]
+  );
+  const visitsRes = await pool.query("select * from navi_visits where doctor_id=$1 order by created_at desc", [id]);
+  res.json({ doctor: dRes.rows[0], products: productsRes.rows, visits: visitsRes.rows, can_edit: req.user.role === "mp" && dRes.rows[0].mp_id === req.user.id });
+});
+
+app.put("/api/navi/doctors/:id", auth, requireRole("mp"), async (req, res) => {
+  const { id } = req.params;
+  const check = await pool.query("select mp_id from navi_doctors where id=$1", [id]);
+  if (!check.rows[0] || check.rows[0].mp_id !== req.user.id) return res.status(403).json({ error: "Forbidden" });
+  const { last_name, first_name, patronymic, city, lpu, specialty, experience_years, psychotype, visit_minutes, needs, behavior, products } = req.body;
+  await pool.query(
+    `update navi_doctors set last_name=coalesce($1,last_name), first_name=coalesce($2,first_name), patronymic=coalesce($3,patronymic),
+     city=coalesce($4,city), lpu=coalesce($5,lpu), specialty=coalesce($6,specialty), experience_years=coalesce($7,experience_years),
+     psychotype=coalesce($8,psychotype), visit_minutes=coalesce($9,visit_minutes), needs=coalesce($10,needs), behavior=coalesce($11,behavior), updated_at=now()
+     where id=$12`,
+    [last_name, first_name, patronymic, city, lpu, specialty, experience_years, psychotype, visit_minutes, needs, behavior, id]
+  );
+  if (products) {
+    await pool.query("delete from navi_doctor_products where doctor_id=$1", [id]);
+    for (const p of products) {
+      if (!p.product_id) continue;
+      await pool.query("insert into navi_doctor_products (doctor_id, product_id, prescriptions) values ($1,$2,$3)", [id, p.product_id, p.prescriptions || 0]);
+    }
+  }
+  res.json({ ok: true });
+});
+
+app.delete("/api/navi/doctors/:id", auth, requireRole("mp"), async (req, res) => {
+  const { id } = req.params;
+  const check = await pool.query("select mp_id from navi_doctors where id=$1", [id]);
+  if (!check.rows[0] || check.rows[0].mp_id !== req.user.id) return res.status(403).json({ error: "Forbidden" });
+  await pool.query("delete from navi_doctors where id=$1", [id]);
+  res.json({ ok: true });
+});
+
+app.post("/api/navi/doctors/:id/start-visit", auth, requireRole("mp"), async (req, res) => {
+  if (!aiEnabled) return res.status(503).json({ error: "NAVI не настроен на сервере (нет ANTHROPIC_API_KEY)" });
+  const { id } = req.params;
+  const { lang } = req.body;
+  const check = await pool.query("select mp_id from navi_doctors where id=$1", [id]);
+  if (!check.rows[0] || check.rows[0].mp_id !== req.user.id) return res.status(403).json({ error: "Forbidden" });
+
+  const dRes = await pool.query("select * from navi_doctors where id=$1", [id]);
+  const productsRes = await pool.query(
+    `select p.name as product_name, dp.prescriptions from navi_doctor_products dp join products p on p.id=dp.product_id where dp.doctor_id=$1`, [id]
+  );
+  const visitsRes = await pool.query(
+    "select visit_date, ai_recommendation, mp_report from navi_visits where doctor_id=$1 and mp_report is not null order by created_at asc", [id]
+  );
+
+  const context = {
+    doctor: {
+      specialty: dRes.rows[0].specialty, experience_years: dRes.rows[0].experience_years, psychotype: dRes.rows[0].psychotype,
+      visit_minutes: dRes.rows[0].visit_minutes, needs: dRes.rows[0].needs, behavior: dRes.rows[0].behavior, city: dRes.rows[0].city, lpu: dRes.rows[0].lpu,
+    },
+    prescribes_currently: productsRes.rows.map((p) => ({ product: p.product_name, prescriptions: p.prescriptions })),
+    past_visits: visitsRes.rows.map((v) => ({ date: v.visit_date, navi_advised: v.ai_recommendation, mp_did: v.mp_report })),
+  };
+
+  let recommendation;
+  try {
+    recommendation = await callClaudeForNavi(context, lang === "uz" ? "uz" : "ru");
+  } catch (e) {
+    console.error("NAVI error:", e.message);
+    return res.status(502).json({ error: "Не удалось получить рекомендацию от NAVI. Попробуйте позже." });
+  }
+
+  const { rows } = await pool.query(
+    "insert into navi_visits (doctor_id, ai_recommendation, ai_lang) values ($1,$2,$3) returning *",
+    [id, recommendation, lang === "uz" ? "uz" : "ru"]
+  );
+  res.json(rows[0]);
+});
+
+app.put("/api/navi/visits/:id", auth, requireRole("mp"), async (req, res) => {
+  const { id } = req.params;
+  const check = await pool.query(
+    `select v.id, d.mp_id from navi_visits v join navi_doctors d on d.id=v.doctor_id where v.id=$1`, [id]
+  );
+  if (!check.rows[0] || check.rows[0].mp_id !== req.user.id) return res.status(403).json({ error: "Forbidden" });
+  const { mp_report } = req.body;
+  await pool.query("update navi_visits set mp_report=$1, reported_at=now() where id=$2", [mp_report || "", id]);
+  res.json({ ok: true });
 });
 
 /* ============================================================

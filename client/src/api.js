@@ -103,6 +103,14 @@ export const api = {
   updateActivityEntry: (id, payload) => request(`/api/activity-entries/${id}`, { method: "PUT", body: payload }),
   deleteActivityEntry: (id) => request(`/api/activity-entries/${id}`, { method: "DELETE" }),
   activityReport: (params) => request(`/api/activity-report?${new URLSearchParams(params).toString()}`),
+
+  listNaviDoctors: (search) => request(`/api/navi/doctors${search ? `?search=${encodeURIComponent(search)}` : ""}`),
+  createNaviDoctor: (payload) => request("/api/navi/doctors", { method: "POST", body: payload }),
+  getNaviDoctor: (id) => request(`/api/navi/doctors/${id}`),
+  updateNaviDoctor: (id, payload) => request(`/api/navi/doctors/${id}`, { method: "PUT", body: payload }),
+  deleteNaviDoctor: (id) => request(`/api/navi/doctors/${id}`, { method: "DELETE" }),
+  startNaviVisit: (id, lang) => request(`/api/navi/doctors/${id}/start-visit`, { method: "POST", body: { lang } }),
+  reportNaviVisit: (visitId, mp_report) => request(`/api/navi/visits/${visitId}`, { method: "PUT", body: { mp_report } }),
   uploadPortfolioFile: (productId, fileType, file, onProgress) => {
     const fd = new FormData();
     fd.append("file", file); fd.append("file_type", fileType);

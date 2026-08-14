@@ -31,7 +31,7 @@ export default function AiInsights() {
   if (status && !status.enabled) {
     return (
       <div className="max-w-3xl mx-auto px-4 sm:px-5 py-16 text-center">
-        <div className="font-display text-2xl mb-3">NAVI не настроен</div>
+        <div className="font-display text-2xl mb-3">Аналитика не настроена</div>
         <div className="text-sm" style={{ color: "#6B7280" }}>
           Мастер-аккаунт ещё не подключил ИИ-анализ на сервере. Это делается один раз — добавляется ключ API в переменные окружения бэкенда, никому из пользователей ничего устанавливать не нужно.
         </div>
@@ -43,7 +43,7 @@ export default function AiInsights() {
     <div className="max-w-4xl mx-auto px-4 sm:px-5 py-8">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
-          <div className="font-display text-2xl font-semibold">NAVI</div>
+          <div className="font-display text-2xl font-semibold">Аналитика</div>
           <div className="text-sm" style={{ color: "#6B7280" }}>
             Глубокий анализ динамики: месяц / квартал / год {data?.generated_at && `· обновлено ${new Date(data.generated_at).toLocaleString("ru-RU")}`}
           </div>
