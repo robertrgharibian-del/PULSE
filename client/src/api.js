@@ -87,11 +87,6 @@ export const api = {
   deleteScientificInfo: (siId) => request(`/api/portfolio/scientific-info/${siId}`, { method: "DELETE" }),
   scientificInfoFileUrl: (siId) => `${BASE}/api/portfolio/scientific-info/${siId}/file?token=${localStorage.getItem("fss_token")}`,
 
-  uploadMyPhoto: (file, onProgress) => {
-    const fd = new FormData();
-    fd.append("photo", file);
-    return uploadWithProgress(`${BASE}/api/auth/me/photo`, fd, onProgress);
-  },
   uploadUserPhoto: (userId, file, onProgress) => {
     const fd = new FormData();
     fd.append("photo", file);

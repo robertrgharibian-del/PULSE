@@ -11,8 +11,6 @@ export default function Profile({ user, onUpdated }) {
   const [error, setError] = useState("");
   const [ok, setOk] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [photoKey, setPhotoKey] = useState(0);
-  const [photoBusy, setPhotoBusy] = useState(false);
 
   async function save(e) {
     e.preventDefault();
@@ -29,27 +27,14 @@ export default function Profile({ user, onUpdated }) {
     } catch (e2) { setError(e2.message); } finally { setBusy(false); }
   }
 
-  async function uploadPhoto(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    setPhotoBusy(true); setError("");
-    try {
-      await api.uploadMyPhoto(file);
-      setPhotoKey((k) => k + 1);
-    } catch (e2) { setError(e2.message); } finally { setPhotoBusy(false); e.target.value = ""; }
-  }
-
   return (
     <div className="max-w-md mx-auto px-4 sm:px-5 py-10">
       <div className="font-display text-2xl font-semibold mb-1">{t("nav.profile")}</div>
       <div className="text-sm mb-6" style={{ color: "#6B7280" }}>{user.email}</div>
 
       <div className="rounded-2xl p-5 mb-4 flex items-center gap-4" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
-        <div key={photoKey}><Avatar userId={user.id} name={fullName} size={64} /></div>
-        <label className="px-4 py-2 rounded text-sm font-semibold cursor-pointer" style={{ background: "#E4E7F0", color: "#1F2937" }}>
-          {photoBusy ? t("common.loading") : t("profile.upload_photo")}
-          <input type="file" accept="image/*" onChange={uploadPhoto} className="hidden" disabled={photoBusy} />
-        </label>
+        <Avatar userId={user.id} name={fullName} size={64} />
+        <div className="text-xs" style={{ color: "#6B7280" }}>{t("profile.photo_note")}</div>
       </div>
 
       <form onSubmit={save} className="rounded-2xl p-5 space-y-4" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>

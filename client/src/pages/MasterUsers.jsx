@@ -150,6 +150,8 @@ function EditUserRow({ u, rms, territories, groups, onSaved }) {
   });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [photoKey, setPhotoKey] = useState(0);
+  const [photoBusy, setPhotoBusy] = useState(false);
 
   async function save() {
     setBusy(true); setError("");
@@ -174,6 +176,14 @@ function EditUserRow({ u, rms, territories, groups, onSaved }) {
       setBusy(true);
       try { await api.patchUser(u.id, { is_active: true }); onSaved(); } catch (e) { setError(e.message); } finally { setBusy(false); }
     }
+  }
+
+  async function uploadPhoto(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    setPhotoBusy(true); setError("");
+    try { await api.uploadUserPhoto(u.id, file); setPhotoKey((k) => k + 1); }
+    catch (err) { setError(err.message); } finally { setPhotoBusy(false); e.target.value = ""; }
   }
 
   if (editing) {
@@ -236,7 +246,7 @@ function EditUserRow({ u, rms, territories, groups, onSaved }) {
     <tr style={{ borderTop: "1px solid #E4E7F0", opacity: u.is_active ? 1 : 0.5 }}>
       <td className="px-4 py-3">
         <div className="flex items-center gap-2">
-          <Avatar userId={u.id} name={u.full_name} size={28} />
+          <div key={photoKey}><Avatar userId={u.id} name={u.full_name} size={28} /></div>
           {u.full_name} {!u.is_active && <span style={{ color: "#DC2626" }}>(удалён)</span>}
         </div>
       </td>
@@ -246,6 +256,11 @@ function EditUserRow({ u, rms, territories, groups, onSaved }) {
       <td className="px-4 py-3" style={{ color: "#6B7280" }}>{u.territory || "—"}</td>
       <td className="px-4 py-3" style={{ color: "#6B7280" }}>{u.email}</td>
       <td className="px-4 py-3 text-right whitespace-nowrap">
+        {error && <div className="text-xs mb-1" style={{ color: "#DC2626" }}>{error}</div>}
+        <label className="text-xs mr-3 cursor-pointer" style={{ color: "#3E4095" }}>
+          {photoBusy ? "…" : "Фото"}
+          <input type="file" accept="image/*" onChange={uploadPhoto} className="hidden" disabled={photoBusy} />
+        </label>
         {u.role !== "master" && (
           <>
             <button onClick={() => setEditing(true)} className="text-xs mr-3" style={{ color: "#ED3237" }}>Изменить</button>

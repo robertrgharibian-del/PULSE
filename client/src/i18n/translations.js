@@ -51,6 +51,7 @@ export const translations = {
     "bm.no_approved": "Пока нет одобренных отчётов",
 
     "profile.upload_photo": "Загрузить фото",
+    "profile.photo_note": "Фото профиля устанавливает мастер-аккаунт в разделе «Пользователи»",
     "profile.change_password": "Сменить пароль (необязательно)",
     "profile.current_password": "Текущий пароль",
     "profile.new_password": "Новый пароль",
@@ -186,6 +187,7 @@ export const translations = {
     "bm.no_approved": "Hozircha tasdiqlangan hisobotlar yo'q",
 
     "profile.upload_photo": "Rasm yuklash",
+    "profile.photo_note": "Profil rasmini master-akkaunt «Foydalanuvchilar» bo'limida belgilaydi",
     "profile.change_password": "Parolni o'zgartirish (ixtiyoriy)",
     "profile.current_password": "Joriy parol",
     "profile.new_password": "Yangi parol",

@@ -349,14 +349,8 @@ app.put("/api/auth/me", auth, async (req, res) => {
   res.json({ ok: true });
 });
 
-/* ---- Profile photo: shown everywhere the person's name appears ---- */
-app.post("/api/auth/me/photo", auth, upload.single("photo"), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: "Файл не получен" });
-  if (!req.file.mimetype.startsWith("image/")) return res.status(400).json({ error: "Загрузите изображение" });
-  await pool.query("update users set photo_data=$1, photo_mime=$2 where id=$3", [req.file.buffer, req.file.mimetype, req.user.id]);
-  res.json({ ok: true });
-});
-
+/* ---- Profile photo: shown everywhere the person's name appears.
+   Only the master account can set/change photos — not self-service. ---- */
 app.post("/api/users/:id/photo", auth, requireRole("master"), upload.single("photo"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "Файл не получен" });
   if (!req.file.mimetype.startsWith("image/")) return res.status(400).json({ error: "Загрузите изображение" });
