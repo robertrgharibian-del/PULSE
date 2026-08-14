@@ -83,7 +83,7 @@ export default function Login({ onLogin }) {
     <div className="min-h-screen flex items-center justify-center px-4 relative">
       {langSwitcher}
       <form onSubmit={submit} className="w-full max-w-sm rounded-2xl p-8" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
-        <img src="/pulse-logo.png" alt="PULSE" style={{ height: "40px", width: "auto" }} className="mb-4" />
+        <img src="/pulse-logo.png" alt="PULSE" style={{ height: "64px", width: "auto" }} className="mb-4" />
         <h1 className="font-display text-2xl font-semibold mb-1">{t("login.title")}</h1>
         <div className="text-sm mb-6" style={{ color: "#6B7280" }}>{t("app.tagline")}</div>
 

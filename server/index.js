@@ -139,7 +139,7 @@ const FFE_GATE = 0.85; // minimum overall FFE score required for incentive eligi
    ============================================================ */
 function auth(req, res, next) {
   const header = req.headers.authorization || "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+  const token = (header.startsWith("Bearer ") ? header.slice(7) : null) || req.query.token || null;
   if (!token) return res.status(401).json({ error: "No token" });
   try {
     req.user = jwt.verify(token, JWT_SECRET);
@@ -349,6 +349,29 @@ app.put("/api/auth/me", auth, async (req, res) => {
   res.json({ ok: true });
 });
 
+/* ---- Profile photo: shown everywhere the person's name appears ---- */
+app.post("/api/auth/me/photo", auth, upload.single("photo"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "Файл не получен" });
+  if (!req.file.mimetype.startsWith("image/")) return res.status(400).json({ error: "Загрузите изображение" });
+  await pool.query("update users set photo_data=$1, photo_mime=$2 where id=$3", [req.file.buffer, req.file.mimetype, req.user.id]);
+  res.json({ ok: true });
+});
+
+app.post("/api/users/:id/photo", auth, requireRole("master"), upload.single("photo"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "Файл не получен" });
+  if (!req.file.mimetype.startsWith("image/")) return res.status(400).json({ error: "Загрузите изображение" });
+  await pool.query("update users set photo_data=$1, photo_mime=$2 where id=$3", [req.file.buffer, req.file.mimetype, req.params.id]);
+  res.json({ ok: true });
+});
+
+app.get("/api/users/:id/photo", auth, async (req, res) => {
+  const { rows } = await pool.query("select photo_data, photo_mime from users where id=$1", [req.params.id]);
+  if (!rows[0] || !rows[0].photo_data) return res.status(404).end();
+  res.setHeader("Content-Type", rows[0].photo_mime);
+  res.setHeader("Cache-Control", "private, max-age=3600");
+  res.end(rows[0].photo_data);
+});
+
 /* ============================================================
    PRODUCTS
    ============================================================ */
@@ -452,11 +475,27 @@ app.get("/api/portfolio/:id", auth, async (req, res) => {
   const prices = compRes.rows.filter((c) => c.competitor_price_usd != null).map((c) => Number(c.competitor_price_usd));
   const avgCompetitorPrice = prices.length ? prices.reduce((s, x) => s + x, 0) / prices.length : null;
 
+  const visualAidsRes = await pool.query(
+    "select id, image_mime, image_name, content_desc, purpose, detail_script, comments, created_at from product_visual_aids where product_id=$1 order by sort_order, created_at",
+    [id]
+  );
+  const promoRes = await pool.query(
+    "select id, file_mime, file_name, material_name, material_type, target_audience, content_desc, purpose, detail_script, comments, created_at from product_promo_materials where product_id=$1 order by sort_order, created_at",
+    [id]
+  );
+  const sciRes = await pool.query(
+    "select id, file_mime, file_name, title, comments, created_at from product_scientific_info where product_id=$1 order by created_at desc",
+    [id]
+  );
+
   res.json({
     product: pRes.rows[0],
     files: filesRes.rows,
     competitors: compRes.rows,
     avg_competitor_price_usd: avgCompetitorPrice,
+    visual_aids: visualAidsRes.rows,
+    promo_materials: promoRes.rows,
+    scientific_info: sciRes.rows,
     can_edit: canEditProduct(req.user, pRes.rows[0].group_id),
   });
 });
@@ -490,7 +529,7 @@ app.post("/api/portfolio/:id/files", auth, requireRole("master", "bm"), upload.s
   if (!pRes.rows[0] || !canEditProduct(req.user, pRes.rows[0].group_id)) return res.status(403).json({ error: "Forbidden" });
   if (!req.file) return res.status(400).json({ error: "Файл не получен" });
   const { file_type } = req.body;
-  if (!["pil", "slides", "other"].includes(file_type)) return res.status(400).json({ error: "Неверный тип файла" });
+  if (file_type !== "pil") return res.status(400).json({ error: "Неверный тип файла" });
   const { rows } = await pool.query(
     "insert into product_files (product_id, file_type, file_name, mime_type, file_data, uploaded_by) values ($1,$2,$3,$4,$5,$6) returning id, file_type, file_name, mime_type, created_at",
     [id, file_type, req.file.originalname, req.file.mimetype, req.file.buffer, req.user.id]
@@ -520,6 +559,154 @@ app.delete("/api/portfolio/files/:fileId", auth, requireRole("master", "bm"), as
   if (!fRes.rows[0] || !canEditProduct(req.user, fRes.rows[0].group_id)) return res.status(403).json({ error: "Forbidden" });
   await pool.query("delete from product_files where id=$1", [fileId]);
   res.json({ ok: true });
+});
+
+/* ---- Visual Aid slides: image + talk-track detail fields ---- */
+app.post("/api/portfolio/:id/visual-aids", auth, requireRole("master", "bm"), upload.single("image"), async (req, res) => {
+  const { id } = req.params;
+  const pRes = await pool.query("select group_id from products where id=$1", [id]);
+  if (!pRes.rows[0] || !canEditProduct(req.user, pRes.rows[0].group_id)) return res.status(403).json({ error: "Forbidden" });
+  if (!req.file) return res.status(400).json({ error: "Загрузите изображение слайда" });
+  const { content_desc, purpose, detail_script, comments } = req.body;
+  const { rows } = await pool.query(
+    `insert into product_visual_aids (product_id, image_data, image_mime, image_name, content_desc, purpose, detail_script, comments, uploaded_by)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning id, image_mime, image_name, content_desc, purpose, detail_script, comments, created_at`,
+    [id, req.file.buffer, req.file.mimetype, req.file.originalname, content_desc || "", purpose || "", detail_script || "", comments || "", req.user.id]
+  );
+  res.json(rows[0]);
+});
+
+app.put("/api/portfolio/visual-aids/:vaId", auth, requireRole("master", "bm"), async (req, res) => {
+  const { vaId } = req.params;
+  const vRes = await pool.query(`select v.id, p.group_id from product_visual_aids v join products p on p.id=v.product_id where v.id=$1`, [vaId]);
+  if (!vRes.rows[0] || !canEditProduct(req.user, vRes.rows[0].group_id)) return res.status(403).json({ error: "Forbidden" });
+  const { content_desc, purpose, detail_script, comments } = req.body;
+  await pool.query(
+    `update product_visual_aids set content_desc=coalesce($1,content_desc), purpose=coalesce($2,purpose),
+     detail_script=coalesce($3,detail_script), comments=coalesce($4,comments) where id=$5`,
+    [content_desc, purpose, detail_script, comments, vaId]
+  );
+  res.json({ ok: true });
+});
+
+app.delete("/api/portfolio/visual-aids/:vaId", auth, requireRole("master", "bm"), async (req, res) => {
+  const { vaId } = req.params;
+  const vRes = await pool.query(`select v.id, p.group_id from product_visual_aids v join products p on p.id=v.product_id where v.id=$1`, [vaId]);
+  if (!vRes.rows[0] || !canEditProduct(req.user, vRes.rows[0].group_id)) return res.status(403).json({ error: "Forbidden" });
+  await pool.query("delete from product_visual_aids where id=$1", [vaId]);
+  res.json({ ok: true });
+});
+
+app.get("/api/portfolio/visual-aids/:vaId/image", auth, async (req, res) => {
+  const { vaId } = req.params;
+  const scope = await portfolioScope(req.user);
+  const vRes = await pool.query(
+    `select v.image_data, v.image_mime, v.image_name, p.group_id from product_visual_aids v join products p on p.id=v.product_id where v.id=$1 and (${scope.where})`,
+    [vaId, ...scope.values]
+  );
+  if (!vRes.rows[0]) return res.status(403).json({ error: "Forbidden" });
+  res.setHeader("Content-Type", vRes.rows[0].image_mime);
+  res.end(vRes.rows[0].image_data);
+});
+
+/* ---- Promo materials: image or PDF, audience targeting, talk-track ---- */
+const PROMO_MATERIAL_TYPES = ["Лифлет", "Блокнот", "Кубарик", "Буклет", "Постер", "Бренд ремайндер"];
+const AUDIENCE_OPTIONS = ["Кардиолог", "ВОП", "Терапевт", "Интервенционист", "Эндокринолог", "ЛОР", "Педиатр", "Аллерголог", "Пульмонолог", "Провизор", "Пациент"];
+
+app.get("/api/portfolio-options", auth, (req, res) => {
+  res.json({ material_types: PROMO_MATERIAL_TYPES, audience_options: AUDIENCE_OPTIONS });
+});
+
+app.post("/api/portfolio/:id/promo-materials", auth, requireRole("master", "bm"), upload.single("file"), async (req, res) => {
+  const { id } = req.params;
+  const pRes = await pool.query("select group_id from products where id=$1", [id]);
+  if (!pRes.rows[0] || !canEditProduct(req.user, pRes.rows[0].group_id)) return res.status(403).json({ error: "Forbidden" });
+  if (!req.file) return res.status(400).json({ error: "Загрузите файл материала" });
+  const { material_name, material_type, target_audience, content_desc, purpose, detail_script, comments } = req.body;
+  if (!material_name || !material_name.trim()) return res.status(400).json({ error: "Укажите название материала" });
+  let audience = [];
+  try { audience = target_audience ? JSON.parse(target_audience) : []; } catch (e) { audience = []; }
+  const { rows } = await pool.query(
+    `insert into product_promo_materials
+     (product_id, file_data, file_mime, file_name, material_name, material_type, target_audience, content_desc, purpose, detail_script, comments, uploaded_by)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+     returning id, file_mime, file_name, material_name, material_type, target_audience, content_desc, purpose, detail_script, comments, created_at`,
+    [id, req.file.buffer, req.file.mimetype, req.file.originalname, material_name.trim(), material_type || null, audience, content_desc || "", purpose || "", detail_script || "", comments || "", req.user.id]
+  );
+  res.json(rows[0]);
+});
+
+app.put("/api/portfolio/promo-materials/:pmId", auth, requireRole("master", "bm"), async (req, res) => {
+  const { pmId } = req.params;
+  const pmRes = await pool.query(`select m.id, p.group_id from product_promo_materials m join products p on p.id=m.product_id where m.id=$1`, [pmId]);
+  if (!pmRes.rows[0] || !canEditProduct(req.user, pmRes.rows[0].group_id)) return res.status(403).json({ error: "Forbidden" });
+  const { material_name, material_type, target_audience, content_desc, purpose, detail_script, comments } = req.body;
+  const audience = Array.isArray(target_audience) ? target_audience : undefined;
+  await pool.query(
+    `update product_promo_materials set material_name=coalesce($1,material_name), material_type=coalesce($2,material_type),
+     target_audience=coalesce($3,target_audience), content_desc=coalesce($4,content_desc), purpose=coalesce($5,purpose),
+     detail_script=coalesce($6,detail_script), comments=coalesce($7,comments) where id=$8`,
+    [material_name, material_type, audience, content_desc, purpose, detail_script, comments, pmId]
+  );
+  res.json({ ok: true });
+});
+
+app.delete("/api/portfolio/promo-materials/:pmId", auth, requireRole("master", "bm"), async (req, res) => {
+  const { pmId } = req.params;
+  const pmRes = await pool.query(`select m.id, p.group_id from product_promo_materials m join products p on p.id=m.product_id where m.id=$1`, [pmId]);
+  if (!pmRes.rows[0] || !canEditProduct(req.user, pmRes.rows[0].group_id)) return res.status(403).json({ error: "Forbidden" });
+  await pool.query("delete from product_promo_materials where id=$1", [pmId]);
+  res.json({ ok: true });
+});
+
+app.get("/api/portfolio/promo-materials/:pmId/file", auth, async (req, res) => {
+  const { pmId } = req.params;
+  const scope = await portfolioScope(req.user);
+  const mRes = await pool.query(
+    `select m.file_data, m.file_mime, m.file_name, p.group_id from product_promo_materials m join products p on p.id=m.product_id where m.id=$1 and (${scope.where})`,
+    [pmId, ...scope.values]
+  );
+  if (!mRes.rows[0]) return res.status(403).json({ error: "Forbidden" });
+  res.setHeader("Content-Type", mRes.rows[0].file_mime);
+  res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(mRes.rows[0].file_name)}"`);
+  res.end(mRes.rows[0].file_data);
+});
+
+/* ---- Scientific info: articles, studies, any format ---- */
+app.post("/api/portfolio/:id/scientific-info", auth, requireRole("master", "bm"), upload.single("file"), async (req, res) => {
+  const { id } = req.params;
+  const pRes = await pool.query("select group_id from products where id=$1", [id]);
+  if (!pRes.rows[0] || !canEditProduct(req.user, pRes.rows[0].group_id)) return res.status(403).json({ error: "Forbidden" });
+  if (!req.file) return res.status(400).json({ error: "Загрузите файл" });
+  const { title, comments } = req.body;
+  if (!title || !title.trim()) return res.status(400).json({ error: "Укажите название" });
+  const { rows } = await pool.query(
+    `insert into product_scientific_info (product_id, file_data, file_mime, file_name, title, comments, uploaded_by)
+     values ($1,$2,$3,$4,$5,$6,$7) returning id, file_mime, file_name, title, comments, created_at`,
+    [id, req.file.buffer, req.file.mimetype, req.file.originalname, title.trim(), comments || "", req.user.id]
+  );
+  res.json(rows[0]);
+});
+
+app.delete("/api/portfolio/scientific-info/:siId", auth, requireRole("master", "bm"), async (req, res) => {
+  const { siId } = req.params;
+  const sRes = await pool.query(`select s.id, p.group_id from product_scientific_info s join products p on p.id=s.product_id where s.id=$1`, [siId]);
+  if (!sRes.rows[0] || !canEditProduct(req.user, sRes.rows[0].group_id)) return res.status(403).json({ error: "Forbidden" });
+  await pool.query("delete from product_scientific_info where id=$1", [siId]);
+  res.json({ ok: true });
+});
+
+app.get("/api/portfolio/scientific-info/:siId/file", auth, async (req, res) => {
+  const { siId } = req.params;
+  const scope = await portfolioScope(req.user);
+  const sRes = await pool.query(
+    `select s.file_data, s.file_mime, s.file_name, p.group_id from product_scientific_info s join products p on p.id=s.product_id where s.id=$1 and (${scope.where})`,
+    [siId, ...scope.values]
+  );
+  if (!sRes.rows[0]) return res.status(403).json({ error: "Forbidden" });
+  res.setHeader("Content-Type", sRes.rows[0].file_mime);
+  res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(sRes.rows[0].file_name)}"`);
+  res.end(sRes.rows[0].file_data);
 });
 
 app.post("/api/portfolio/:id/competitors", auth, requireRole("master", "bm"), async (req, res) => {
@@ -602,18 +789,58 @@ function drawBrochurePage(doc, data, files) {
 
   if (files && files.length > 0) {
     doc.moveDown(1);
-    doc.font(FONT_BOLD).fontSize(12).fillColor("#C58A1F").text("Материалы");
+    doc.font(FONT_BOLD).fontSize(12).fillColor("#C58A1F").text("PIL (инструкция по применению)");
     doc.moveDown(0.2);
     doc.font(FONT_REGULAR);
     files.forEach((f) => {
       const embedded = f.mime_type === "application/pdf";
       const note = embedded ? "— страницы приложены далее" : `— формат ${f.mime_type.split("/")[1] || f.mime_type}, скачайте отдельно в системе`;
-      doc.fontSize(10).fillColor(embedded ? "#1F2937" : "#8493AA").text(`• ${FILE_TYPE_LABEL_RU[f.file_type] || f.file_type}: ${f.file_name} ${note}`);
+      doc.fontSize(10).fillColor(embedded ? "#1F2937" : "#8493AA").text(`• ${f.file_name} ${note}`);
     });
   }
 
   doc.moveDown(1);
   doc.fontSize(8).fillColor("#B71C1C").text(CONFIDENTIALITY_NOTICE, { width: 480 });
+}
+
+// Image + a set of labelled detail fields, laid out side by side (image left, text right)
+function drawImageWithFieldsPage(doc, imageBuffer, imageMime, title, fields) {
+  doc.font(FONT_BOLD).fontSize(14).fillColor("#3E4095").text(title, { width: 495 });
+  doc.moveDown(0.5);
+  const imgY = doc.y;
+  const imgW = 260, imgH = 320;
+  try {
+    doc.image(imageBuffer, 50, imgY, { fit: [imgW, imgH] });
+  } catch (e) {
+    doc.font(FONT_REGULAR).fontSize(9).fillColor("#8493AA").text("[изображение не может быть встроено]", 50, imgY);
+  }
+  let textX = 50 + imgW + 20;
+  let textY = imgY;
+  const textW = 495 - imgW - 20;
+  fields.forEach(([label, value]) => {
+    if (!value) return;
+    doc.font(FONT_BOLD).fontSize(10).fillColor("#C58A1F").text(label, textX, textY, { width: textW });
+    textY = doc.y + 2;
+    doc.font(FONT_REGULAR).fontSize(9).fillColor("#1F2937").text(value, textX, textY, { width: textW });
+    textY = doc.y + 10;
+  });
+  doc.y = Math.max(imgY + imgH, textY) + 10;
+  doc.x = 50;
+  doc.font(FONT_REGULAR).fontSize(7).fillColor("#B71C1C").text(CONFIDENTIALITY_NOTICE, 50, doc.y, { width: 495 });
+}
+
+function drawTextOnlyDetailsPage(doc, title, fields) {
+  doc.font(FONT_BOLD).fontSize(14).fillColor("#3E4095").text(title, { width: 495 });
+  doc.moveDown(0.5);
+  fields.forEach(([label, value]) => {
+    if (!value) return;
+    doc.font(FONT_BOLD).fontSize(10).fillColor("#C58A1F").text(label);
+    doc.moveDown(0.15);
+    doc.font(FONT_REGULAR).fontSize(9).fillColor("#1F2937").text(value, { width: 495 });
+    doc.moveDown(0.6);
+  });
+  doc.moveDown(0.5);
+  doc.font(FONT_REGULAR).fontSize(7).fillColor("#B71C1C").text(CONFIDENTIALITY_NOTICE, { width: 495 });
 }
 
 function collectPdfKitBuffer(doc) {
@@ -625,35 +852,92 @@ function collectPdfKitBuffer(doc) {
   });
 }
 
+async function pdfkitPageToMerged(merged, drawFn) {
+  const d = new PDFDocument({ margin: 50 });
+  const bufferPromise = collectPdfKitBuffer(d);
+  drawFn(d);
+  d.end();
+  const buffer = await bufferPromise;
+  const srcPdf = await PdfLibDocument.load(buffer);
+  const pages = await merged.copyPages(srcPdf, srcPdf.getPageIndices());
+  pages.forEach((p) => merged.addPage(p));
+}
+
+async function mergeRealPdfPages(merged, pdfBuffer, label) {
+  try {
+    const srcPdf = await PdfLibDocument.load(pdfBuffer, { ignoreEncryption: true });
+    const pages = await merged.copyPages(srcPdf, srcPdf.getPageIndices());
+    pages.forEach((p) => merged.addPage(p));
+  } catch (e) {
+    console.error(`Failed to merge PDF (${label}) into brochure:`, e.message);
+  }
+}
+
 // Builds one product's full brochure section as PDF bytes: the info card,
-// followed by the actual pages of every attached PDF file (PIL, slides, etc.)
+// PIL pages, Visual Aid slides (image + talk-track), Promo materials
+// (image or full PDF + audience/talk-track details), and Scientific info.
 async function buildProductBrochureBuffer(productId) {
   const data = await loadPortfolioDetail(productId);
   const filesRes = await pool.query("select * from product_files where product_id=$1 order by created_at desc", [productId]);
   const files = filesRes.rows;
-
-  const cardDoc = new PDFDocument({ margin: 50 });
-  const bufferPromise = collectPdfKitBuffer(cardDoc);
-  drawBrochurePage(cardDoc, data, files);
-  cardDoc.end();
-  const cardBuffer = await bufferPromise;
+  const vaRes = await pool.query("select * from product_visual_aids where product_id=$1 order by sort_order, created_at", [productId]);
+  const pmRes = await pool.query("select * from product_promo_materials where product_id=$1 order by sort_order, created_at", [productId]);
+  const siRes = await pool.query("select * from product_scientific_info where product_id=$1 order by created_at", [productId]);
 
   const merged = await PdfLibDocument.create();
-  const cardPdf = await PdfLibDocument.load(cardBuffer);
-  const cardPages = await merged.copyPages(cardPdf, cardPdf.getPageIndices());
-  cardPages.forEach((p) => merged.addPage(p));
 
+  // 1. Info card
+  await pdfkitPageToMerged(merged, (d) => drawBrochurePage(d, data, files));
+
+  // 2. PIL — merge real pages if PDF
   for (const f of files) {
-    if (f.mime_type === "application/pdf") {
-      try {
-        const srcPdf = await PdfLibDocument.load(f.file_data, { ignoreEncryption: true });
-        const pages = await merged.copyPages(srcPdf, srcPdf.getPageIndices());
-        pages.forEach((p) => merged.addPage(p));
-      } catch (e) {
-        console.error(`Failed to merge PDF file #${f.id} into brochure:`, e.message);
-      }
+    if (f.mime_type === "application/pdf") await mergeRealPdfPages(merged, f.file_data, `PIL #${f.id}`);
+  }
+
+  // 3. Visual Aid slides — image + 4 fields, one page each
+  for (const va of vaRes.rows) {
+    await pdfkitPageToMerged(merged, (d) => drawImageWithFieldsPage(d, va.image_data, va.image_mime, `Visual Aid: ${va.image_name}`, [
+      ["Содержание слайда", va.content_desc],
+      ["Цель слайда", va.purpose],
+      ["Детализация", va.detail_script],
+      ["Комментарии", va.comments],
+    ]));
+  }
+
+  // 4. Promo materials — image+fields page, or details page + real PDF pages
+  for (const pm of pmRes.rows) {
+    const fields = [
+      ["Тип материала", pm.material_type],
+      ["Целевая аудитория", (pm.target_audience || []).join(", ")],
+      ["Содержание материала", pm.content_desc],
+      ["Цель материала", pm.purpose],
+      ["Детализация", pm.detail_script],
+      ["Комментарии", pm.comments],
+    ];
+    if (pm.file_mime === "application/pdf") {
+      await pdfkitPageToMerged(merged, (d) => drawTextOnlyDetailsPage(d, `Промо материал: ${pm.material_name}`, fields));
+      await mergeRealPdfPages(merged, pm.file_data, `promo #${pm.id}`);
+    } else {
+      await pdfkitPageToMerged(merged, (d) => drawImageWithFieldsPage(d, pm.file_data, pm.file_mime, `Промо материал: ${pm.material_name}`, fields));
     }
   }
+
+  // 5. Scientific info
+  for (const si of siRes.rows) {
+    if (si.file_mime === "application/pdf") {
+      await pdfkitPageToMerged(merged, (d) => drawTextOnlyDetailsPage(d, `Научная информация: ${si.title}`, [["Комментарии", si.comments]]));
+      await mergeRealPdfPages(merged, si.file_data, `sci #${si.id}`);
+    } else if (si.file_mime.startsWith("image/")) {
+      await pdfkitPageToMerged(merged, (d) => drawImageWithFieldsPage(d, si.file_data, si.file_mime, `Научная информация: ${si.title}`, [["Комментарии", si.comments]]));
+    } else {
+      await pdfkitPageToMerged(merged, (d) => drawTextOnlyDetailsPage(d, `Научная информация: ${si.title}`, [
+        ["Формат", si.file_mime],
+        ["Примечание", "Файл доступен для скачивания отдельно в системе (не может быть встроен в PDF)"],
+        ["Комментарии", si.comments],
+      ]));
+    }
+  }
+
   return Buffer.from(await merged.save());
 }
 

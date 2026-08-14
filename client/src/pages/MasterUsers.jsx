@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import Avatar from "../components/Avatar.jsx";
 import { api } from "../api.js";
 
 const ROLE_LABEL = { master: "Мастер", rm: "РМ", mp: "МП", bm: "БМ" };
@@ -233,7 +234,12 @@ function EditUserRow({ u, rms, territories, groups, onSaved }) {
 
   return (
     <tr style={{ borderTop: "1px solid #E4E7F0", opacity: u.is_active ? 1 : 0.5 }}>
-      <td className="px-4 py-3">{u.full_name} {!u.is_active && <span style={{ color: "#DC2626" }}>(удалён)</span>}</td>
+      <td className="px-4 py-3">
+        <div className="flex items-center gap-2">
+          <Avatar userId={u.id} name={u.full_name} size={28} />
+          {u.full_name} {!u.is_active && <span style={{ color: "#DC2626" }}>(удалён)</span>}
+        </div>
+      </td>
       <td className="px-4 py-3">{ROLE_LABEL[u.role] || u.role}</td>
       <td className="px-4 py-3" style={{ color: "#6B7280" }}>{u.rm_name || "—"}</td>
       <td className="px-4 py-3" style={{ color: "#6B7280" }}>{u.group_name || "—"}</td>
@@ -258,6 +264,8 @@ export default function MasterUsers() {
   const [rms, setRms] = useState([]);
   const [territories, setTerritories] = useState([]);
   const [groups, setGroups] = useState([]);
+  const [sortKey, setSortKey] = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
 
   async function loadAll() {
     setUsers(await api.listUsers());
@@ -266,6 +274,25 @@ export default function MasterUsers() {
     setGroups(await api.listGroups());
   }
   useEffect(() => { loadAll(); }, []);
+
+  function toggleSort(key) {
+    if (sortKey === key) { setSortDir((d) => (d === "asc" ? "desc" : "asc")); }
+    else { setSortKey(key); setSortDir("asc"); }
+  }
+
+  const sortedUsers = [...users].sort((a, b) => {
+    if (!sortKey) return 0;
+    const va = (a[sortKey] || "").toString().toLowerCase();
+    const vb = (b[sortKey] || "").toString().toLowerCase();
+    const cmp = va < vb ? -1 : va > vb ? 1 : 0;
+    return sortDir === "asc" ? cmp : -cmp;
+  });
+
+  const SortableHeader = ({ label, sortField }) => (
+    <th className="text-left px-4 py-3 cursor-pointer select-none" onClick={() => toggleSort(sortField)}>
+      {label} {sortKey === sortField && (sortDir === "asc" ? "▲" : "▼")}
+    </th>
+  );
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-5 py-8">
@@ -280,14 +307,17 @@ export default function MasterUsers() {
         <table className="w-full text-sm">
           <thead>
             <tr style={{ background: "#F7F8FC", color: "#6B7280" }} className="uppercase text-xs">
-              <th className="text-left px-4 py-3">Имя</th><th className="text-left px-4 py-3">Роль</th>
-              <th className="text-left px-4 py-3">РМ</th><th className="text-left px-4 py-3">Группа</th>
-              <th className="text-left px-4 py-3">Территория</th><th className="text-left px-4 py-3">Email</th>
+              <th className="text-left px-4 py-3">Имя</th>
+              <SortableHeader label="Роль" sortField="role" />
+              <SortableHeader label="РМ" sortField="rm_name" />
+              <SortableHeader label="Группа" sortField="group_name" />
+              <SortableHeader label="Территория" sortField="territory" />
+              <th className="text-left px-4 py-3">Email</th>
               <th className="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => (
+            {sortedUsers.map((u) => (
               <EditUserRow key={u.id} u={u} rms={rms} territories={territories} groups={groups} onSaved={loadAll} />
             ))}
           </tbody>

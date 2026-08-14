@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import Avatar from "../components/Avatar.jsx";
 import { api } from "../api.js";
 import ReportView from "../components/ReportView.jsx";
 import RmBonusView from "../components/RmBonusView.jsx";
@@ -62,7 +63,7 @@ export default function MasterReports({ user }) {
               const st = STATUS_LABEL[r.status];
               return (
                 <tr key={r.id} style={{ borderTop: "1px solid #E4E7F0" }}>
-                  <td className="px-4 py-3">{r.mp_name}</td>
+                  <td className="px-4 py-3"><div className="flex items-center gap-2"><Avatar userId={r.mp_id} name={r.mp_name} size={26} />{r.mp_name}</div></td>
                   <td className="px-4 py-3" style={{ color: "#6B7280" }}>{r.rm_name || "—"}</td>
                   <td className="px-4 py-3" style={{ color: "#6B7280" }}>{r.mp_territory || "—"}</td>
                   <td className="px-4 py-3 font-mono">{r.period_month}/{r.period_year}</td>

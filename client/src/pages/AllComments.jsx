@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import Avatar from "../components/Avatar.jsx";
 import { api } from "../api.js";
 
 export default function AllComments() {
@@ -25,7 +26,8 @@ export default function AllComments() {
           {filtered.map((c) => (
             <div key={c.id} className="rounded-xl p-3" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
               <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
-                <div className="text-sm">
+                <div className="text-sm flex items-center gap-2">
+                  <Avatar userId={c.author_id} name={c.author_name} size={24} />
                   <span style={{ color: "#ED3237" }} className="font-semibold">{c.author_name}</span>
                   <span style={{ color: "#6B7280" }}> ({c.author_role === "rm" ? "РМ" : c.author_role === "master" ? "Мастер" : "МП"})</span>
                 </div>

@@ -301,6 +301,55 @@ create index if not exists idx_product_competitors_product on product_competitor
 -- migration 010 (kept in sync here for fresh installs — see migration_010.sql for existing DBs)
 alter table products add column if not exists is_active boolean not null default true;
 
+-- migration 011 (kept in sync here for fresh installs — see migration_011.sql for existing DBs)
+create table if not exists product_visual_aids (
+  id             bigserial primary key,
+  product_id     bigint not null references products(id) on delete cascade,
+  image_data     bytea not null,
+  image_mime     text not null,
+  image_name     text not null,
+  content_desc   text,
+  purpose        text,
+  detail_script  text,
+  comments       text,
+  sort_order     int not null default 0,
+  uploaded_by    bigint not null references users(id),
+  created_at     timestamptz not null default now()
+);
+create index if not exists idx_visual_aids_product on product_visual_aids(product_id);
+create table if not exists product_promo_materials (
+  id                bigserial primary key,
+  product_id        bigint not null references products(id) on delete cascade,
+  file_data         bytea not null,
+  file_mime         text not null,
+  file_name         text not null,
+  material_name     text not null,
+  material_type     text,
+  target_audience   text[] default '{}',
+  content_desc      text,
+  purpose           text,
+  detail_script     text,
+  comments          text,
+  sort_order        int not null default 0,
+  uploaded_by       bigint not null references users(id),
+  created_at        timestamptz not null default now()
+);
+create index if not exists idx_promo_materials_product on product_promo_materials(product_id);
+create table if not exists product_scientific_info (
+  id           bigserial primary key,
+  product_id   bigint not null references products(id) on delete cascade,
+  file_data    bytea not null,
+  file_mime    text not null,
+  file_name    text not null,
+  title        text not null,
+  comments     text,
+  uploaded_by  bigint not null references users(id),
+  created_at   timestamptz not null default now()
+);
+create index if not exists idx_scientific_info_product on product_scientific_info(product_id);
+alter table users add column if not exists photo_data bytea;
+alter table users add column if not exists photo_mime text;
+
 -- ============================================================
 -- SEED: product catalog (FY'27, MSN Rhythm + Prime)
 -- ============================================================

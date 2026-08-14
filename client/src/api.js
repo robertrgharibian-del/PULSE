@@ -71,6 +71,33 @@ export const api = {
   updateCompetitor: (cid, payload) => request(`/api/portfolio/competitors/${cid}`, { method: "PUT", body: payload }),
   deleteCompetitor: (cid) => request(`/api/portfolio/competitors/${cid}`, { method: "DELETE" }),
   deletePortfolioFile: (fileId) => request(`/api/portfolio/files/${fileId}`, { method: "DELETE" }),
+  portfolioOptions: () => request("/api/portfolio-options"),
+
+  addVisualAid: (productId, formData, onProgress) => uploadWithProgress(`${BASE}/api/portfolio/${productId}/visual-aids`, formData, onProgress),
+  updateVisualAid: (vaId, payload) => request(`/api/portfolio/visual-aids/${vaId}`, { method: "PUT", body: payload }),
+  deleteVisualAid: (vaId) => request(`/api/portfolio/visual-aids/${vaId}`, { method: "DELETE" }),
+  visualAidImageUrl: (vaId) => `${BASE}/api/portfolio/visual-aids/${vaId}/image?token=${localStorage.getItem("fss_token")}`,
+
+  addPromoMaterial: (productId, formData, onProgress) => uploadWithProgress(`${BASE}/api/portfolio/${productId}/promo-materials`, formData, onProgress),
+  updatePromoMaterial: (pmId, payload) => request(`/api/portfolio/promo-materials/${pmId}`, { method: "PUT", body: payload }),
+  deletePromoMaterial: (pmId) => request(`/api/portfolio/promo-materials/${pmId}`, { method: "DELETE" }),
+  promoMaterialFileUrl: (pmId) => `${BASE}/api/portfolio/promo-materials/${pmId}/file?token=${localStorage.getItem("fss_token")}`,
+
+  addScientificInfo: (productId, formData, onProgress) => uploadWithProgress(`${BASE}/api/portfolio/${productId}/scientific-info`, formData, onProgress),
+  deleteScientificInfo: (siId) => request(`/api/portfolio/scientific-info/${siId}`, { method: "DELETE" }),
+  scientificInfoFileUrl: (siId) => `${BASE}/api/portfolio/scientific-info/${siId}/file?token=${localStorage.getItem("fss_token")}`,
+
+  uploadMyPhoto: (file, onProgress) => {
+    const fd = new FormData();
+    fd.append("photo", file);
+    return uploadWithProgress(`${BASE}/api/auth/me/photo`, fd, onProgress);
+  },
+  uploadUserPhoto: (userId, file, onProgress) => {
+    const fd = new FormData();
+    fd.append("photo", file);
+    return uploadWithProgress(`${BASE}/api/users/${userId}/photo`, fd, onProgress);
+  },
+  userPhotoUrl: (userId) => `${BASE}/api/users/${userId}/photo?token=${localStorage.getItem("fss_token")}`,
   uploadPortfolioFile: (productId, fileType, file, onProgress) => {
     const fd = new FormData();
     fd.append("file", file); fd.append("file_type", fileType);

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import Avatar from "../components/Avatar.jsx";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { api } from "../api.js";
 
@@ -67,9 +68,12 @@ export default function MpProfile({ mpId, mpName, onBack }) {
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-5 py-8">
       <button onClick={onBack} className="text-sm mb-4" style={{ color: "#6B7280" }}>← Назад к команде</button>
-      <div className="mb-6">
-        <div className="font-display text-2xl font-semibold">{profile.mp.full_name}</div>
-        <div className="text-sm" style={{ color: "#6B7280" }}>{profile.mp.territory || "—"} {profile.mp.group_name ? `· ${profile.mp.group_name}` : ""}</div>
+      <div className="mb-6 flex items-center gap-4">
+        <Avatar userId={profile.mp.id} name={profile.mp.full_name} size={56} />
+        <div>
+          <div className="font-display text-2xl font-semibold">{profile.mp.full_name}</div>
+          <div className="text-sm" style={{ color: "#6B7280" }}>{profile.mp.territory || "—"} {profile.mp.group_name ? `· ${profile.mp.group_name}` : ""}</div>
+        </div>
       </div>
 
       {profile.bonus && (
