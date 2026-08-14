@@ -27,23 +27,23 @@ export default function Profile({ user, onUpdated }) {
   return (
     <div className="max-w-md mx-auto px-4 sm:px-5 py-10">
       <div className="font-display text-2xl font-semibold mb-1">Профиль</div>
-      <div className="text-sm mb-6" style={{ color: "#8493AA" }}>{user.email}</div>
+      <div className="text-sm mb-6" style={{ color: "#6B7280" }}>{user.email}</div>
 
-      <form onSubmit={save} className="rounded-2xl p-5 space-y-4" style={{ background: "#141F33", border: "1px solid #22304A" }}>
+      <form onSubmit={save} className="rounded-2xl p-5 space-y-4" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
         <div>
-          <label className="block text-xs uppercase tracking-wide mb-1" style={{ color: "#8493AA" }}>Имя</label>
-          <input value={fullName} onChange={(e) => setFullName(e.target.value)} className="w-full bg-transparent border rounded px-3 py-2" style={{ borderColor: "#3A4A66" }} />
+          <label className="block text-xs uppercase tracking-wide mb-1" style={{ color: "#6B7280" }}>Имя</label>
+          <input value={fullName} onChange={(e) => setFullName(e.target.value)} className="w-full bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }} />
         </div>
-        <div className="pt-2 border-t" style={{ borderColor: "#22304A" }}>
-          <div className="text-xs uppercase mb-2" style={{ color: "#8493AA" }}>Сменить пароль (необязательно)</div>
+        <div className="pt-2 border-t" style={{ borderColor: "#E4E7F0" }}>
+          <div className="text-xs uppercase mb-2" style={{ color: "#6B7280" }}>Сменить пароль (необязательно)</div>
           <input type="password" placeholder="Текущий пароль" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)}
-            className="w-full mb-2 bg-transparent border rounded px-3 py-2" style={{ borderColor: "#3A4A66" }} />
+            className="w-full mb-2 bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }} />
           <input type="password" placeholder="Новый пароль" value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
-            className="w-full bg-transparent border rounded px-3 py-2" style={{ borderColor: "#3A4A66" }} />
+            className="w-full bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }} />
         </div>
-        {error && <div className="text-sm" style={{ color: "#E2574C" }}>{error}</div>}
-        {ok && <div className="text-sm" style={{ color: "#3FB88F" }}>✓ Сохранено</div>}
-        <button disabled={busy} type="submit" className="w-full py-2.5 rounded font-semibold" style={{ background: "#3FB88F", color: "#0E1726" }}>
+        {error && <div className="text-sm" style={{ color: "#DC2626" }}>{error}</div>}
+        {ok && <div className="text-sm" style={{ color: "#16A34A" }}>✓ Сохранено</div>}
+        <button disabled={busy} type="submit" className="w-full py-2.5 rounded font-semibold" style={{ background: "#16A34A", color: "#FFFFFF" }}>
           {busy ? "Сохранение…" : "Сохранить"}
         </button>
       </form>

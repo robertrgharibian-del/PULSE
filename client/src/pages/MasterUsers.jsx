@@ -16,19 +16,19 @@ function GroupManager({ groups, onCreated }) {
   }
 
   return (
-    <div className="rounded-2xl p-4 sm:p-5 mb-6" style={{ background: "#141F33", border: "1px solid #22304A" }}>
+    <div className="rounded-2xl p-4 sm:p-5 mb-6" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
       <div className="font-display text-lg mb-3">Группы (портфолио)</div>
       <div className="flex flex-wrap gap-2 mb-3">
         {groups.map((g) => (
-          <span key={g.id} className="px-3 py-1.5 rounded-full text-sm" style={{ background: "#22304A" }}>{g.name}</span>
+          <span key={g.id} className="px-3 py-1.5 rounded-full text-sm" style={{ background: "#E4E7F0" }}>{g.name}</span>
         ))}
       </div>
       <div className="flex gap-2">
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Название новой группы"
-          className="bg-transparent border rounded px-3 py-2 text-sm flex-1" style={{ borderColor: "#3A4A66" }} />
-        <button onClick={add} disabled={busy} className="px-4 py-2 rounded text-sm font-semibold" style={{ background: "#3FB88F", color: "#0E1726" }}>+ Добавить</button>
+          className="bg-transparent border rounded px-3 py-2 text-sm flex-1" style={{ borderColor: "#D3D8E4" }} />
+        <button onClick={add} disabled={busy} className="px-4 py-2 rounded text-sm font-semibold" style={{ background: "#16A34A", color: "#FFFFFF" }}>+ Добавить</button>
       </div>
-      {error && <div className="text-sm mt-2" style={{ color: "#E2574C" }}>{error}</div>}
+      {error && <div className="text-sm mt-2" style={{ color: "#DC2626" }}>{error}</div>}
     </div>
   );
 }
@@ -55,48 +55,48 @@ function CreateUserForm({ rms, territories, groups, onCreated }) {
   }
 
   return (
-    <form onSubmit={submit} className="rounded-2xl p-4 sm:p-5 mb-8" style={{ background: "#141F33", border: "1px solid #22304A" }}>
+    <form onSubmit={submit} className="rounded-2xl p-4 sm:p-5 mb-8" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
       <div className="font-display text-lg mb-4">Создать аккаунт</div>
       <div className="flex flex-wrap gap-2 mb-4">
         {[["mp", "Медпред (МП)"], ["rm", "Региональный менеджер (РМ)"], ["bm", "Бренд-менеджер (БМ)"]].map(([v, label]) => (
           <button type="button" key={v} onClick={() => setRole(v)}
             className="px-3 py-1.5 rounded text-sm"
-            style={{ background: role === v ? "#E8B04B" : "#22304A", color: role === v ? "#0E1726" : "#C9D2E0" }}>
+            style={{ background: role === v ? "#ED3237" : "#E4E7F0", color: role === v ? "#FFFFFF" : "#374151" }}>
             {label}
           </button>
         ))}
       </div>
       <div className="grid sm:grid-cols-2 gap-3 text-sm">
         <input required placeholder="Имя Фамилия" value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })}
-          className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#3A4A66" }} />
+          className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }} />
         <input required type="email" placeholder="email@company.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
-          className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#3A4A66" }} />
+          className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }} />
         <input required type="password" placeholder="Пароль" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}
-          className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#3A4A66" }} />
+          className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }} />
         {role === "mp" && (
           <select required value={form.territory} onChange={(e) => setForm({ ...form, territory: e.target.value })}
-            className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#3A4A66" }}>
+            className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }}>
             <option value="" style={{ color: "#000" }}>— выберите территорию —</option>
             {territories.map((t) => <option key={t.key} value={t.label} style={{ color: "#000" }}>{t.label}</option>)}
           </select>
         )}
         {(role === "mp" || role === "bm") && (
           <select required value={form.group_id} onChange={(e) => setForm({ ...form, group_id: e.target.value })}
-            className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#3A4A66" }}>
+            className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }}>
             <option value="" style={{ color: "#000" }}>— выберите группу —</option>
             {groups.map((g) => <option key={g.id} value={g.id} style={{ color: "#000" }}>{g.name}</option>)}
           </select>
         )}
         {role === "mp" && (
           <select required value={form.rm_id} onChange={(e) => setForm({ ...form, rm_id: e.target.value })}
-            className="bg-transparent border rounded px-3 py-2 sm:col-span-2" style={{ borderColor: "#3A4A66" }}>
+            className="bg-transparent border rounded px-3 py-2 sm:col-span-2" style={{ borderColor: "#D3D8E4" }}>
             <option value="" style={{ color: "#000" }}>— выберите РМ, к которому прикрепить МП —</option>
             {rms.map((rm) => <option key={rm.id} value={rm.id} style={{ color: "#000" }}>{rm.full_name} ({rm.territory || "—"})</option>)}
           </select>
         )}
       </div>
-      {error && <div className="text-sm mt-3" style={{ color: "#E2574C" }}>{error}</div>}
-      <button disabled={busy} type="submit" className="mt-4 px-5 py-2.5 rounded font-semibold" style={{ background: "#3FB88F", color: "#0E1726" }}>
+      {error && <div className="text-sm mt-3" style={{ color: "#DC2626" }}>{error}</div>}
+      <button disabled={busy} type="submit" className="mt-4 px-5 py-2.5 rounded font-semibold" style={{ background: "#16A34A", color: "#FFFFFF" }}>
         {busy ? "Создание…" : "Создать аккаунт"}
       </button>
     </form>
@@ -121,17 +121,17 @@ function ResetRequests({ onResolved }) {
 
   if (requests.length === 0) return null;
   return (
-    <div className="rounded-2xl p-4 sm:p-5 mb-6" style={{ background: "#E8B04B15", border: "1px solid #E8B04B44" }}>
-      <div className="font-display text-lg mb-3" style={{ color: "#E8B04B" }}>Запросы на восстановление пароля ({requests.length})</div>
+    <div className="rounded-2xl p-4 sm:p-5 mb-6" style={{ background: "#ED323715", border: "1px solid #ED323744" }}>
+      <div className="font-display text-lg mb-3" style={{ color: "#ED3237" }}>Запросы на восстановление пароля ({requests.length})</div>
       <div className="space-y-2">
         {requests.map((r) => (
-          <div key={r.id} className="flex flex-wrap items-center gap-2 rounded-lg p-3" style={{ background: "#141F33" }}>
+          <div key={r.id} className="flex flex-wrap items-center gap-2 rounded-lg p-3" style={{ background: "#F7F8FC" }}>
             <div className="text-sm flex-1 min-w-[160px]">
-              <b>{r.full_name}</b> <span style={{ color: "#8493AA" }}>({r.email}) · {ROLE_LABEL[r.role]}</span>
+              <b>{r.full_name}</b> <span style={{ color: "#6B7280" }}>({r.email}) · {ROLE_LABEL[r.role]}</span>
             </div>
             <input type="password" placeholder="Новый пароль" value={passwords[r.id] || ""} onChange={(e) => setPasswords((p) => ({ ...p, [r.id]: e.target.value }))}
-              className="bg-transparent border rounded px-2 py-1.5 text-sm" style={{ borderColor: "#3A4A66", width: "160px" }} />
-            <button onClick={() => resolve(r.user_id, r.id)} disabled={busyId === r.id} className="px-3 py-1.5 rounded text-sm font-semibold" style={{ background: "#3FB88F", color: "#0E1726" }}>
+              className="bg-transparent border rounded px-2 py-1.5 text-sm" style={{ borderColor: "#D3D8E4", width: "160px" }} />
+            <button onClick={() => resolve(r.user_id, r.id)} disabled={busyId === r.id} className="px-3 py-1.5 rounded text-sm font-semibold" style={{ background: "#16A34A", color: "#FFFFFF" }}>
               Задать пароль
             </button>
           </div>
@@ -177,36 +177,36 @@ function EditUserRow({ u, rms, territories, groups, onSaved }) {
 
   if (editing) {
     return (
-      <tr style={{ borderTop: "1px solid #22304A", background: "#1B2A44" }}>
+      <tr style={{ borderTop: "1px solid #E4E7F0", background: "#EEF1F8" }}>
         <td colSpan={7} className="px-4 py-3">
           <div className="grid sm:grid-cols-2 gap-2 text-sm mb-2">
             <label className="flex flex-col gap-1">
-              <span className="text-xs" style={{ color: "#8493AA" }}>Имя</span>
+              <span className="text-xs" style={{ color: "#6B7280" }}>Имя</span>
               <input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })}
-                className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#3A4A66" }} />
+                className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#D3D8E4" }} />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-xs" style={{ color: "#8493AA" }}>Email</span>
+              <span className="text-xs" style={{ color: "#6B7280" }}>Email</span>
               <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
-                className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#3A4A66" }} />
+                className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#D3D8E4" }} />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-xs" style={{ color: "#8493AA" }}>Новый пароль (необязательно)</span>
+              <span className="text-xs" style={{ color: "#6B7280" }}>Новый пароль (необязательно)</span>
               <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Оставьте пустым, чтобы не менять"
-                className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#3A4A66" }} />
+                className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#D3D8E4" }} />
             </label>
             {u.role === "mp" && (
               <label className="flex flex-col gap-1">
-                <span className="text-xs" style={{ color: "#8493AA" }}>Территория</span>
-                <select value={form.territory} onChange={(e) => setForm({ ...form, territory: e.target.value })} className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#3A4A66" }}>
+                <span className="text-xs" style={{ color: "#6B7280" }}>Территория</span>
+                <select value={form.territory} onChange={(e) => setForm({ ...form, territory: e.target.value })} className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#D3D8E4" }}>
                   {territories.map((t) => <option key={t.key} value={t.label} style={{ color: "#000" }}>{t.label}</option>)}
                 </select>
               </label>
             )}
             {(u.role === "mp" || u.role === "bm") && (
               <label className="flex flex-col gap-1">
-                <span className="text-xs" style={{ color: "#8493AA" }}>Группа</span>
-                <select value={form.group_id} onChange={(e) => setForm({ ...form, group_id: e.target.value })} className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#3A4A66" }}>
+                <span className="text-xs" style={{ color: "#6B7280" }}>Группа</span>
+                <select value={form.group_id} onChange={(e) => setForm({ ...form, group_id: e.target.value })} className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#D3D8E4" }}>
                   <option value="" style={{ color: "#000" }}>Без группы</option>
                   {groups.map((g) => <option key={g.id} value={g.id} style={{ color: "#000" }}>{g.name}</option>)}
                 </select>
@@ -214,17 +214,17 @@ function EditUserRow({ u, rms, territories, groups, onSaved }) {
             )}
             {u.role === "mp" && (
               <label className="flex flex-col gap-1 sm:col-span-2">
-                <span className="text-xs" style={{ color: "#8493AA" }}>Региональный менеджер</span>
-                <select value={form.rm_id} onChange={(e) => setForm({ ...form, rm_id: e.target.value })} className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#3A4A66" }}>
+                <span className="text-xs" style={{ color: "#6B7280" }}>Региональный менеджер</span>
+                <select value={form.rm_id} onChange={(e) => setForm({ ...form, rm_id: e.target.value })} className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#D3D8E4" }}>
                   {rms.map((rm) => <option key={rm.id} value={rm.id} style={{ color: "#000" }}>{rm.full_name}</option>)}
                 </select>
               </label>
             )}
           </div>
-          {error && <div className="text-xs mb-2" style={{ color: "#E2574C" }}>{error}</div>}
+          {error && <div className="text-xs mb-2" style={{ color: "#DC2626" }}>{error}</div>}
           <div className="flex gap-2">
-            <button onClick={save} disabled={busy} className="px-3 py-1.5 rounded text-xs font-semibold" style={{ background: "#3FB88F", color: "#0E1726" }}>Сохранить</button>
-            <button onClick={() => setEditing(false)} className="px-3 py-1.5 rounded text-xs" style={{ background: "#22304A" }}>Отмена</button>
+            <button onClick={save} disabled={busy} className="px-3 py-1.5 rounded text-xs font-semibold" style={{ background: "#16A34A", color: "#FFFFFF" }}>Сохранить</button>
+            <button onClick={() => setEditing(false)} className="px-3 py-1.5 rounded text-xs" style={{ background: "#E4E7F0" }}>Отмена</button>
           </div>
         </td>
       </tr>
@@ -232,18 +232,18 @@ function EditUserRow({ u, rms, territories, groups, onSaved }) {
   }
 
   return (
-    <tr style={{ borderTop: "1px solid #22304A", opacity: u.is_active ? 1 : 0.5 }}>
-      <td className="px-4 py-3">{u.full_name} {!u.is_active && <span style={{ color: "#E2574C" }}>(удалён)</span>}</td>
+    <tr style={{ borderTop: "1px solid #E4E7F0", opacity: u.is_active ? 1 : 0.5 }}>
+      <td className="px-4 py-3">{u.full_name} {!u.is_active && <span style={{ color: "#DC2626" }}>(удалён)</span>}</td>
       <td className="px-4 py-3">{ROLE_LABEL[u.role] || u.role}</td>
-      <td className="px-4 py-3" style={{ color: "#8493AA" }}>{u.rm_name || "—"}</td>
-      <td className="px-4 py-3" style={{ color: "#8493AA" }}>{u.group_name || "—"}</td>
-      <td className="px-4 py-3" style={{ color: "#8493AA" }}>{u.territory || "—"}</td>
-      <td className="px-4 py-3" style={{ color: "#8493AA" }}>{u.email}</td>
+      <td className="px-4 py-3" style={{ color: "#6B7280" }}>{u.rm_name || "—"}</td>
+      <td className="px-4 py-3" style={{ color: "#6B7280" }}>{u.group_name || "—"}</td>
+      <td className="px-4 py-3" style={{ color: "#6B7280" }}>{u.territory || "—"}</td>
+      <td className="px-4 py-3" style={{ color: "#6B7280" }}>{u.email}</td>
       <td className="px-4 py-3 text-right whitespace-nowrap">
         {u.role !== "master" && (
           <>
-            <button onClick={() => setEditing(true)} className="text-xs mr-3" style={{ color: "#E8B04B" }}>Изменить</button>
-            <button onClick={toggleActive} disabled={busy} className="text-xs" style={{ color: u.is_active ? "#E2574C" : "#3FB88F" }}>
+            <button onClick={() => setEditing(true)} className="text-xs mr-3" style={{ color: "#ED3237" }}>Изменить</button>
+            <button onClick={toggleActive} disabled={busy} className="text-xs" style={{ color: u.is_active ? "#DC2626" : "#16A34A" }}>
               {u.is_active ? "Удалить" : "Восстановить"}
             </button>
           </>
@@ -270,16 +270,16 @@ export default function MasterUsers() {
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-5 py-8">
       <div className="font-display text-2xl font-semibold mb-1">Пользователи</div>
-      <div className="text-sm mb-6" style={{ color: "#8493AA" }}>Создание аккаунтов РМ, БМ и медпредов</div>
+      <div className="text-sm mb-6" style={{ color: "#6B7280" }}>Создание аккаунтов РМ, БМ и медпредов</div>
 
       <ResetRequests onResolved={loadAll} />
       <GroupManager groups={groups} onCreated={loadAll} />
       <CreateUserForm rms={rms} territories={territories} groups={groups} onCreated={loadAll} />
 
-      <div className="rounded-2xl overflow-x-auto" style={{ border: "1px solid #22304A" }}>
+      <div className="rounded-2xl overflow-x-auto" style={{ border: "1px solid #E4E7F0" }}>
         <table className="w-full text-sm">
           <thead>
-            <tr style={{ background: "#141F33", color: "#8493AA" }} className="uppercase text-xs">
+            <tr style={{ background: "#F7F8FC", color: "#6B7280" }} className="uppercase text-xs">
               <th className="text-left px-4 py-3">Имя</th><th className="text-left px-4 py-3">Роль</th>
               <th className="text-left px-4 py-3">РМ</th><th className="text-left px-4 py-3">Группа</th>
               <th className="text-left px-4 py-3">Территория</th><th className="text-left px-4 py-3">Email</th>

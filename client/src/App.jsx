@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api } from "./api.js";
+import { useLanguage } from "./i18n/LanguageContext.jsx";
 import Login from "./pages/Login.jsx";
 import MpPanel from "./pages/MpPanel.jsx";
 import RmPanel from "./pages/RmPanel.jsx";
@@ -16,17 +17,26 @@ import DocTrackingList from "./pages/DocTrackingList.jsx";
 import PortfolioList from "./pages/PortfolioList.jsx";
 import RmBonusView from "./components/RmBonusView.jsx";
 
-const ROLE_LABEL = { master: "Мастер-аккаунт", rm: "Региональный менеджер", mp: "Медпредставитель", bm: "Бренд-менеджер" };
-
 const NAV = {
-  master: [["reports", "Отчёты"], ["users", "Пользователи"], ["imports", "Загрузка данных"], ["comments", "Комментарии"], ["dashboard", "Дашборд"], ["doctracking", "DOC TRACKING"], ["portfolio", "Портфолио"], ["ai", "ИИ-рекомендации"], ["profile", "Профиль"]],
-  rm: [["team", "Команда"], ["myteam", "Моя команда"], ["bonus", "Мой бонус"], ["dashboard", "Дашборд"], ["doctracking", "DOC TRACKING"], ["portfolio", "Портфолио"], ["ai", "ИИ-рекомендации"], ["profile", "Профиль"]],
-  mp: [["report", "Мой отчёт"], ["doctracking", "DOC TRACKING"], ["portfolio", "Портфолио"], ["ai", "ИИ-рекомендации"], ["profile", "Профиль"]],
-  bm: [["reports", "Отчёты"], ["doctracking", "DOC TRACKING"], ["portfolio", "Портфолио"], ["profile", "Профиль"]],
+  master: [["reports", "nav.reports"], ["users", "nav.users"], ["imports", "nav.imports"], ["comments", "nav.comments"], ["dashboard", "nav.dashboard"], ["doctracking", "nav.doctracking"], ["portfolio", "nav.portfolio"], ["ai", "nav.ai"], ["profile", "nav.profile"]],
+  rm: [["team", "nav.team"], ["myteam", "nav.myteam"], ["bonus", "nav.bonus"], ["dashboard", "nav.dashboard"], ["doctracking", "nav.doctracking"], ["portfolio", "nav.portfolio"], ["ai", "nav.ai"], ["profile", "nav.profile"]],
+  mp: [["report", "nav.myreport"], ["doctracking", "nav.doctracking"], ["portfolio", "nav.portfolio"], ["ai", "nav.ai"], ["profile", "nav.profile"]],
+  bm: [["reports", "nav.reports"], ["doctracking", "nav.doctracking"], ["portfolio", "nav.portfolio"], ["profile", "nav.profile"]],
 };
 const DEFAULT_SECTION = { master: "reports", rm: "team", mp: "report", bm: "reports" };
 
+function LanguageSwitcher() {
+  const { lang, setLang } = useLanguage();
+  return (
+    <div className="flex rounded-lg overflow-hidden text-xs font-semibold" style={{ border: "1px solid #E4E7F0" }}>
+      <button onClick={() => setLang("ru")} className="px-2.5 py-1.5" style={{ background: lang === "ru" ? "#3E4095" : "transparent", color: lang === "ru" ? "#FFFFFF" : "#6B7280" }}>RU</button>
+      <button onClick={() => setLang("uz")} className="px-2.5 py-1.5" style={{ background: lang === "uz" ? "#3E4095" : "transparent", color: lang === "uz" ? "#FFFFFF" : "#6B7280" }}>UZ</button>
+    </div>
+  );
+}
+
 export default function App() {
+  const { t } = useLanguage();
   const [user, setUser] = useState(null);
   const [checking, setChecking] = useState(true);
   const [section, setSection] = useState("reports");
@@ -48,32 +58,33 @@ export default function App() {
     setUser(null);
   }
 
-  if (checking) return <div style={{ background: "#0E1726", minHeight: "100vh" }} />;
-  if (!user) return <div style={{ background: "#0E1726", minHeight: "100vh" }}><Login onLogin={handleLogin} /></div>;
+  if (checking) return <div style={{ background: "#FFFFFF", minHeight: "100vh" }} />;
+  if (!user) return <div style={{ background: "#FFFFFF", minHeight: "100vh" }}><Login onLogin={handleLogin} /></div>;
 
   const nav = NAV[user.role] || [];
 
   return (
-    <div style={{ background: "#0E1726", minHeight: "100vh" }}>
-      <div className="border-b" style={{ borderColor: "#22304A" }}>
+    <div style={{ background: "#FFFFFF", minHeight: "100vh" }}>
+      <div className="border-b" style={{ borderColor: "#E4E7F0" }}>
         <div className="flex items-center justify-between px-4 sm:px-6 py-4">
           <div className="flex items-center gap-2">
             <img src="/pulse-logo.png" alt="PULSE" style={{ height: "28px", width: "auto" }} />
           </div>
           <div className="flex items-center gap-3 sm:gap-4 text-xs sm:text-sm">
-            <span className="hidden sm:inline" style={{ color: "#8493AA" }}>
-              {user.full_name} · {ROLE_LABEL[user.role]}{user.group_name ? ` · ${user.group_name}` : ""}
+            <LanguageSwitcher />
+            <span className="hidden sm:inline" style={{ color: "#6B7280" }}>
+              {user.full_name} · {t(`role.${user.role}`)}{user.group_name ? ` · ${user.group_name}` : ""}
             </span>
-            <button onClick={logout} className="px-3 py-1.5 rounded" style={{ background: "#22304A" }}>Выйти</button>
+            <button onClick={logout} className="px-3 py-1.5 rounded" style={{ background: "#E4E7F0" }}>{t("app.logout")}</button>
           </div>
         </div>
         {nav.length > 1 && (
           <div className="flex gap-1 px-4 sm:px-6 pb-2 overflow-x-auto">
-            {nav.map(([key, label]) => (
+            {nav.map(([key, labelKey]) => (
               <button key={key} onClick={() => setSection(key)}
                 className="px-3 sm:px-4 py-1.5 rounded-lg text-sm font-medium shrink-0"
-                style={{ background: section === key ? "#E8B04B" : "transparent", color: section === key ? "#0E1726" : "#8493AA" }}>
-                {label}
+                style={{ background: section === key ? "#ED3237" : "transparent", color: section === key ? "#FFFFFF" : "#6B7280" }}>
+                {t(labelKey)}
               </button>
             ))}
           </div>

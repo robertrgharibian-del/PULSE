@@ -18,10 +18,10 @@ function angleForPct(pct) {
   return 180 + t * 180;
 }
 export function tierForAchievement(a) {
-  if (a < 0.9) return { label: "Нет бонуса", color: "#64748B" };
-  if (a < 1.0) return { label: "60% ставки", color: "#E8B04B" };
-  if (a <= 1.25) return { label: "100% ставки", color: "#3FB88F" };
-  return { label: "Потолок 125%", color: "#8B7CF6" };
+  if (a < 0.9) return { label: "Нет бонуса", color: "#6B7280" };
+  if (a < 1.0) return { label: "60% ставки", color: "#ED3237" };
+  if (a <= 1.25) return { label: "100% ставки", color: "#16A34A" };
+  return { label: "Потолок 125%", color: "#7C3AED" };
 }
 
 export default function Gauge({ achievement = 0, size = 168 }) {
@@ -30,10 +30,10 @@ export default function Gauge({ achievement = 0, size = 168 }) {
   const rOuter = size / 2 - 10;
   const rInner = rOuter - 14;
   const zones = [
-    { a0: angleForPct(0), a1: angleForPct(0.9), color: "#334155" },
-    { a0: angleForPct(0.9), a1: angleForPct(1.0), color: "#E8B04B" },
-    { a0: angleForPct(1.0), a1: angleForPct(1.25), color: "#3FB88F" },
-    { a0: angleForPct(1.25), a1: angleForPct(1.5), color: "#8B7CF6" },
+    { a0: angleForPct(0), a1: angleForPct(0.9), color: "#475569" },
+    { a0: angleForPct(0.9), a1: angleForPct(1.0), color: "#ED3237" },
+    { a0: angleForPct(1.0), a1: angleForPct(1.25), color: "#16A34A" },
+    { a0: angleForPct(1.25), a1: angleForPct(1.5), color: "#7C3AED" },
   ];
   const needleAngle = angleForPct(achievement);
   const needleTip = polarToCartesian(cx, cy, rInner - 2, needleAngle);
@@ -44,9 +44,9 @@ export default function Gauge({ achievement = 0, size = 168 }) {
       {zones.map((z, i) => (
         <path key={i} d={describeBand(cx, cy, rOuter, rInner, z.a0, z.a1)} fill={z.color} opacity={0.95} />
       ))}
-      <line x1={cx} y1={cy} x2={needleTip.x} y2={needleTip.y} stroke="#F5F0E6" strokeWidth={3} strokeLinecap="round" />
-      <circle cx={cx} cy={cy} r={5} fill="#F5F0E6" />
-      <text x={cx} y={cy - 22} textAnchor="middle" fontSize="20" fontFamily="'IBM Plex Mono', monospace" fontWeight="600" fill="#F5F0E6">
+      <line x1={cx} y1={cy} x2={needleTip.x} y2={needleTip.y} stroke="#1F2937" strokeWidth={3} strokeLinecap="round" />
+      <circle cx={cx} cy={cy} r={5} fill="#1F2937" />
+      <text x={cx} y={cy - 22} textAnchor="middle" fontSize="20" fontFamily="'IBM Plex Mono', monospace" fontWeight="600" fill="#1F2937">
         {(achievement * 100).toFixed(1)}%
       </text>
       <text x={cx} y={cy - 4} textAnchor="middle" fontSize="10" fontFamily="Inter, sans-serif" fill={tier.color} fontWeight="600">

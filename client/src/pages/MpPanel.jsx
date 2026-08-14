@@ -26,21 +26,21 @@ export default function MpPanel({ user }) {
   return (
     <div className="max-w-2xl mx-auto px-5 py-12">
       <div className="font-display text-2xl font-semibold mb-1">Мой отчёт</div>
-      <div className="text-sm mb-6" style={{ color: "#8493AA" }}>Выберите период, чтобы открыть или создать отчёт FSS/FFE/Action Plan</div>
-      <div className="rounded-2xl p-6 flex flex-wrap items-end gap-4" style={{ background: "#141F33", border: "1px solid #22304A" }}>
+      <div className="text-sm mb-6" style={{ color: "#6B7280" }}>Выберите период, чтобы открыть или создать отчёт FSS/FFE/Action Plan</div>
+      <div className="rounded-2xl p-6 flex flex-wrap items-end gap-4" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
         <label className="flex flex-col gap-1 text-sm">
-          <span style={{ color: "#8493AA" }}>Месяц</span>
-          <select value={month} onChange={(e) => setMonth(Number(e.target.value))} className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#3A4A66" }}>
+          <span style={{ color: "#6B7280" }}>Месяц</span>
+          <select value={month} onChange={(e) => setMonth(Number(e.target.value))} className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }}>
             {MONTHS.map((m, i) => <option key={m} value={i + 1} style={{ color: "#000" }}>{m}</option>)}
           </select>
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span style={{ color: "#8493AA" }}>Год</span>
-          <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))} className="bg-transparent border rounded px-3 py-2 w-24" style={{ borderColor: "#3A4A66" }} />
+          <span style={{ color: "#6B7280" }}>Год</span>
+          <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))} className="bg-transparent border rounded px-3 py-2 w-24" style={{ borderColor: "#D3D8E4" }} />
         </label>
-        <button onClick={open} className="px-5 py-2.5 rounded font-semibold" style={{ background: "#E8B04B", color: "#0E1726" }}>Открыть отчёт</button>
+        <button onClick={open} className="px-5 py-2.5 rounded font-semibold" style={{ background: "#ED3237", color: "#FFFFFF" }}>Открыть отчёт</button>
       </div>
-      {error && <div className="text-sm mt-4" style={{ color: "#E2574C" }}>{error}</div>}
+      {error && <div className="text-sm mt-4" style={{ color: "#DC2626" }}>{error}</div>}
     </div>
   );
 }

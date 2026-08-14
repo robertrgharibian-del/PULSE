@@ -3,12 +3,12 @@
 @tailwind utilities;
 
 body {
-  background: #0e1726;
-  color: #f5f0e6;
+  background: #FFFFFF;
+  color: #1F2937;
   font-family: "Inter", sans-serif;
 }
-.font-display { font-family: "Fraunces", serif; }
+.font-display { font-family: "Inter", sans-serif; font-weight: 700; letter-spacing: -0.01em; color: #3E4095; }
 .font-mono { font-family: "IBM Plex Mono", monospace; }
 
 input, select, textarea { font-family: inherit; }
-::selection { background: #e8b04b44; }
+::selection { background: #ED323744; }

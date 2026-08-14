@@ -6,24 +6,24 @@ const MONTHS = ["Январь", "Февраль", "Март", "Апрель", "�
 function ResultBox({ result }) {
   if (!result) return null;
   return (
-    <div className="mt-4 rounded-xl p-4 text-sm" style={{ background: "#1B2A44" }}>
-      <div className="font-semibold mb-2" style={{ color: "#3FB88F" }}>✓ Обновлено медпредов: {result.mp_updated}</div>
+    <div className="mt-4 rounded-xl p-4 text-sm" style={{ background: "#EEF1F8" }}>
+      <div className="font-semibold mb-2" style={{ color: "#16A34A" }}>✓ Обновлено медпредов: {result.mp_updated}</div>
       {result.no_mp_for_territory?.length > 0 && (
         <div className="mb-2">
-          <div style={{ color: "#E8B04B" }}>Нет активного МП для территорий:</div>
-          <div style={{ color: "#8493AA" }}>{result.no_mp_for_territory.join(", ")}</div>
+          <div style={{ color: "#ED3237" }}>Нет активного МП для территорий:</div>
+          <div style={{ color: "#6B7280" }}>{result.no_mp_for_territory.join(", ")}</div>
         </div>
       )}
       {(result.missing_areas?.length > 0 || result.missing_sheets?.length > 0) && (
         <div className="mb-2">
-          <div style={{ color: "#E2574C" }}>Не найдены листы в файле:</div>
-          <div style={{ color: "#8493AA" }}>{[...(result.missing_areas || []), ...(result.missing_sheets || [])].join(", ")}</div>
+          <div style={{ color: "#DC2626" }}>Не найдены листы в файле:</div>
+          <div style={{ color: "#6B7280" }}>{[...(result.missing_areas || []), ...(result.missing_sheets || [])].join(", ")}</div>
         </div>
       )}
       {result.unmatched_products?.length > 0 && (
         <div>
-          <div style={{ color: "#E8B04B" }}>Не распознаны как препараты из каталога ({result.unmatched_products.length}):</div>
-          <div style={{ color: "#8493AA" }} className="max-h-32 overflow-y-auto">
+          <div style={{ color: "#ED3237" }}>Не распознаны как препараты из каталога ({result.unmatched_products.length}):</div>
+          <div style={{ color: "#6B7280" }} className="max-h-32 overflow-y-auto">
             {result.unmatched_products.map((u, i) => <div key={i}>{u.sheet} · строка {u.row}: {u.name}</div>)}
           </div>
         </div>
@@ -49,21 +49,21 @@ function ImportHistory({ refreshKey }) {
 
   if (!history) return null;
   return (
-    <div className="rounded-2xl p-4 sm:p-5" style={{ background: "#141F33", border: "1px solid #22304A" }}>
+    <div className="rounded-2xl p-4 sm:p-5" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
       <div className="font-display text-lg mb-3">История загрузок</div>
-      {history.length === 0 && <div className="text-sm" style={{ color: "#8493AA" }}>Загрузок пока не было</div>}
+      {history.length === 0 && <div className="text-sm" style={{ color: "#6B7280" }}>Загрузок пока не было</div>}
       <div className="space-y-2">
         {history.map((h) => (
-          <div key={h.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg p-3 text-sm" style={{ background: "#1B2A44", opacity: h.reverted ? 0.5 : 1 }}>
+          <div key={h.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg p-3 text-sm" style={{ background: "#EEF1F8", opacity: h.reverted ? 0.5 : 1 }}>
             <div>
               <b>{h.import_type === "fss" ? "FSS продажи" : "Таргеты"}</b>
               {" "}· {h.import_type === "fss" ? `${h.period_month}/${h.period_year}` : `FY${h.period_year - 1999}`}
               {" "}· {h.uploaded_by_name} · {new Date(h.created_at).toLocaleString("ru-RU")}
-              {h.reverted && <span style={{ color: "#E2574C" }}> · отменено</span>}
-              <div style={{ color: "#8493AA" }}>Обновлено МП: {h.summary?.mp_updated ?? "—"}</div>
+              {h.reverted && <span style={{ color: "#DC2626" }}> · отменено</span>}
+              <div style={{ color: "#6B7280" }}>Обновлено МП: {h.summary?.mp_updated ?? "—"}</div>
             </div>
             {!h.reverted && (
-              <button onClick={() => undo(h.id)} disabled={busyId === h.id} className="px-3 py-1.5 rounded text-xs" style={{ background: "#E2574C22", color: "#E2574C" }}>
+              <button onClick={() => undo(h.id)} disabled={busyId === h.id} className="px-3 py-1.5 rounded text-xs" style={{ background: "#DC262622", color: "#DC2626" }}>
                 Отменить загрузку
               </button>
             )}
@@ -80,13 +80,13 @@ function ProgressBar({ progress, done }) {
     <div className="mt-3">
       {!done && (
         <>
-          <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: "#22304A" }}>
-            <div className="h-full rounded-full transition-all" style={{ width: `${progress}%`, background: "#E8B04B" }} />
+          <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: "#E4E7F0" }}>
+            <div className="h-full rounded-full transition-all" style={{ width: `${progress}%`, background: "#ED3237" }} />
           </div>
-          <div className="text-xs mt-1" style={{ color: "#8493AA" }}>{progress}%</div>
+          <div className="text-xs mt-1" style={{ color: "#6B7280" }}>{progress}%</div>
         </>
       )}
-      {done && <div className="text-sm" style={{ color: "#3FB88F" }}>✓ Загружено успешно</div>}
+      {done && <div className="text-sm" style={{ color: "#16A34A" }}>✓ Загружено успешно</div>}
     </div>
   );
 }
@@ -136,51 +136,51 @@ export default function MasterImports() {
     <div className="max-w-3xl mx-auto px-4 sm:px-5 py-8 space-y-8">
       <div>
         <div className="font-display text-2xl font-semibold mb-1">Загрузка данных</div>
-        <div className="text-sm" style={{ color: "#8493AA" }}>Продажи и таргеты распределяются автоматически по территориям медпредов</div>
+        <div className="text-sm" style={{ color: "#6B7280" }}>Продажи и таргеты распределяются автоматически по территориям медпредов</div>
       </div>
 
-      <div className="rounded-2xl p-4 sm:p-5" style={{ background: "#141F33", border: "1px solid #22304A" }}>
+      <div className="rounded-2xl p-4 sm:p-5" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
         <div className="font-display text-lg mb-3">Загрузить отчёт FSS (продажи за месяц)</div>
         <div className="flex flex-wrap gap-3 items-end mb-3">
           <label className="flex flex-col gap-1 text-sm">
-            <span style={{ color: "#8493AA" }}>Месяц</span>
-            <select value={fssMonth} onChange={(e) => setFssMonth(Number(e.target.value))} className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#3A4A66" }}>
+            <span style={{ color: "#6B7280" }}>Месяц</span>
+            <select value={fssMonth} onChange={(e) => setFssMonth(Number(e.target.value))} className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }}>
               {MONTHS.map((m, i) => <option key={m} value={i + 1} style={{ color: "#000" }}>{m}</option>)}
             </select>
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span style={{ color: "#8493AA" }}>Год</span>
-            <input type="number" value={fssYear} onChange={(e) => setFssYear(Number(e.target.value))} className="bg-transparent border rounded px-3 py-2 w-24" style={{ borderColor: "#3A4A66" }} />
+            <span style={{ color: "#6B7280" }}>Год</span>
+            <input type="number" value={fssYear} onChange={(e) => setFssYear(Number(e.target.value))} className="bg-transparent border rounded px-3 py-2 w-24" style={{ borderColor: "#D3D8E4" }} />
           </label>
         </div>
         <input type="file" accept=".xlsx" onChange={(e) => setFssFile(e.target.files[0])}
           className="text-sm mb-3 block" />
         {fssFile && (
-          <button onClick={uploadFss} disabled={fssBusy} className="px-5 py-2.5 rounded font-semibold" style={{ background: "#E8B04B", color: "#0E1726" }}>
+          <button onClick={uploadFss} disabled={fssBusy} className="px-5 py-2.5 rounded font-semibold" style={{ background: "#ED3237", color: "#FFFFFF" }}>
             {fssBusy ? "Загрузка…" : "Загрузить"}
           </button>
         )}
-        {fssError && <div className="text-sm mt-3" style={{ color: "#E2574C" }}>{fssError}</div>}
+        {fssError && <div className="text-sm mt-3" style={{ color: "#DC2626" }}>{fssError}</div>}
         <ProgressBar progress={fssProgress} done={fssDone} />
         <ResultBox result={fssResult} />
       </div>
 
-      <div className="rounded-2xl p-4 sm:p-5" style={{ background: "#141F33", border: "1px solid #22304A" }}>
+      <div className="rounded-2xl p-4 sm:p-5" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
         <div className="font-display text-lg mb-3">Загрузить Таргеты (план продаж на год)</div>
         <label className="flex flex-col gap-1 text-sm mb-3 w-32">
-          <span style={{ color: "#8493AA" }}>Финансовый год</span>
-          <select value={fy} onChange={(e) => setFy(Number(e.target.value))} className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#3A4A66" }}>
+          <span style={{ color: "#6B7280" }}>Финансовый год</span>
+          <select value={fy} onChange={(e) => setFy(Number(e.target.value))} className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }}>
             {Array.from({ length: 163 }, (_, i) => 27 + i).map((n) => <option key={n} value={n} style={{ color: "#000" }}>FY{n}</option>)}
           </select>
         </label>
         <input type="file" accept=".xlsx" onChange={(e) => setTgtFile(e.target.files[0])}
           className="text-sm mb-3 block" />
         {tgtFile && (
-          <button onClick={uploadTargets} disabled={tgtBusy} className="px-5 py-2.5 rounded font-semibold" style={{ background: "#E8B04B", color: "#0E1726" }}>
+          <button onClick={uploadTargets} disabled={tgtBusy} className="px-5 py-2.5 rounded font-semibold" style={{ background: "#ED3237", color: "#FFFFFF" }}>
             {tgtBusy ? "Загрузка…" : "Загрузить"}
           </button>
         )}
-        {tgtError && <div className="text-sm mt-3" style={{ color: "#E2574C" }}>{tgtError}</div>}
+        {tgtError && <div className="text-sm mt-3" style={{ color: "#DC2626" }}>{tgtError}</div>}
         <ProgressBar progress={tgtProgress} done={tgtDone} />
         <ResultBox result={tgtResult} />
       </div>
