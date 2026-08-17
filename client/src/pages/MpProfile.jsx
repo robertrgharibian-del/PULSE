@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import Avatar from "../components/Avatar.jsx";
+import ReportView from "../components/ReportView.jsx";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { api, monthName } from "../api.js";
 
@@ -12,11 +13,12 @@ function achColor(pct) {
 
 const STATUS_LABEL = { draft: "Черновик", submitted: "На рассмотрении", returned: "На доработке", approved: "Одобрено" };
 
-export default function MpProfile({ mpId, mpName, onBack }) {
+export default function MpProfile({ mpId, mpName, user, onBack }) {
   const [profile, setProfile] = useState(null);
   const [tab, setTab] = useState("history");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [openReportId, setOpenReportId] = useState(null);
 
   const now = new Date();
   const [planYear, setPlanYear] = useState(now.getFullYear());
@@ -61,8 +63,13 @@ export default function MpProfile({ mpId, mpName, onBack }) {
     } catch (e) { setError(e.message); } finally { setBusy(false); }
   }
 
+  if (openReportId) {
+    return <ReportView reportId={openReportId} user={user} onBack={() => { setOpenReportId(null); load(); }} />;
+  }
+
   if (!profile) return <div className="p-8" style={{ color: "#6B7280" }}>Загрузка…</div>;
 
+  const canEditPlan = user?.role === "rm";
   const chartData = profile.monthly.map((m) => ({ period: m.period, План: m.target_usd, Факт: m.actual_usd }));
 
   return (
@@ -76,18 +83,33 @@ export default function MpProfile({ mpId, mpName, onBack }) {
         </div>
       </div>
 
-      {profile.bonus && (
-        <div className="rounded-2xl p-4 mb-6 flex flex-wrap gap-6 items-center" style={{ background: "linear-gradient(90deg,#EEF1F8,#F7F8FC)", border: "1px solid #E4E7F0" }}>
-          <div>
-            <div className="text-xs uppercase" style={{ color: "#6B7280" }}>Достижение (Q{profile.bonus.quarter} {profile.bonus.year})</div>
-            <div className="font-mono text-xl font-bold" style={{ color: achColor(profile.bonus.achievement) }}>{(profile.bonus.achievement * 100).toFixed(1)}%</div>
+      <div className="grid sm:grid-cols-2 gap-4 mb-6">
+        {profile.bonus && (
+          <div className="rounded-2xl p-4 flex flex-wrap gap-6 items-center" style={{ background: "linear-gradient(90deg,#EEF1F8,#F7F8FC)", border: "1px solid #E4E7F0" }}>
+            <div>
+              <div className="text-xs uppercase" style={{ color: "#6B7280" }}>Достижение (Q{profile.bonus.quarter} {profile.bonus.year})</div>
+              <div className="font-mono text-xl font-bold" style={{ color: achColor(profile.bonus.achievement) }}>{(profile.bonus.achievement * 100).toFixed(1)}%</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase" style={{ color: "#6B7280" }}>Бонус за квартал</div>
+              <div className="font-mono text-xl font-bold" style={{ color: "#ED3237" }}>{Math.round(profile.bonus.bonus_uzs).toLocaleString()} UZS</div>
+            </div>
           </div>
-          <div>
-            <div className="text-xs uppercase" style={{ color: "#6B7280" }}>Бонус за квартал</div>
-            <div className="font-mono text-xl font-bold" style={{ color: "#ED3237" }}>{Math.round(profile.bonus.bonus_uzs).toLocaleString()} UZS</div>
+        )}
+        {profile.latestDetail && (
+          <div className="rounded-2xl p-4" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
+            <div className="text-xs uppercase mb-2" style={{ color: "#6B7280" }}>Последний одобренный отчёт ({profile.latestDetail.period})</div>
+            <div className="flex flex-wrap gap-4 text-sm">
+              <div>Конверсия: <b>{profile.latestDetail.conversion_doctors}</b> врачей</div>
+              <div>Потенциал: <b>{profile.latestDetail.potential_doctors}</b> врачей</div>
+              <div>Возможности: <b>{profile.latestDetail.opportunities.length}</b></div>
+            </div>
+            {profile.latestDetail.opportunities.length > 0 && (
+              <div className="text-xs mt-1" style={{ color: "#6B7280" }}>{profile.latestDetail.opportunities.join(", ")}</div>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {chartData.length > 0 && (
         <div className="rounded-2xl p-4 mb-6" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
@@ -117,14 +139,20 @@ export default function MpProfile({ mpId, mpName, onBack }) {
       {tab === "history" && (
         <div className="space-y-4">
           <div className="rounded-2xl p-4" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
-            <div className="font-display text-lg mb-3">Отчёты</div>
+            <div className="font-display text-lg mb-1">Отчёты</div>
+            <div className="text-xs mb-3" style={{ color: "#6B7280" }}>Нажмите на отчёт, чтобы увидеть все данные целиком: FSS, FFE, Конверсию, Потенциал, Ожидания по продажам, Бонус</div>
             <div className="space-y-2">
-              {profile.history.map((h) => (
-                <div key={h.report_id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg p-3" style={{ background: "#EEF1F8" }}>
-                  <div className="text-sm">{h.period} · <span style={{ color: "#6B7280" }}>{STATUS_LABEL[h.status]}</span></div>
-                  <div className="font-mono text-sm" style={{ color: achColor(h.achievement) }}>{h.achievement !== null ? `${(h.achievement * 100).toFixed(1)}%` : "—"}</div>
-                </div>
-              ))}
+              {profile.history.map((h) => {
+                const canOpen = user?.role === "master" || (user?.role === "rm" && h.status !== "draft") || (user?.role === "bm" && h.status === "approved");
+                const Row = canOpen ? "button" : "div";
+                return (
+                  <Row key={h.report_id} onClick={canOpen ? () => setOpenReportId(h.report_id) : undefined}
+                    className="w-full text-left flex flex-wrap items-center justify-between gap-2 rounded-lg p-3" style={{ background: "#EEF1F8", opacity: canOpen ? 1 : 0.6, cursor: canOpen ? "pointer" : "default" }}>
+                    <div className="text-sm">{h.period} · <span style={{ color: "#6B7280" }}>{STATUS_LABEL[h.status]}</span>{!canOpen && <span style={{ color: "#6B7280" }}> · пока недоступен для просмотра</span>}</div>
+                    <div className="font-mono text-sm" style={{ color: achColor(h.achievement) }}>{h.achievement !== null ? `${(h.achievement * 100).toFixed(1)}%` : "—"}</div>
+                  </Row>
+                );
+              })}
               {profile.history.length === 0 && <div className="text-sm" style={{ color: "#6B7280" }}>Отчётов пока нет</div>}
             </div>
           </div>
@@ -152,45 +180,63 @@ export default function MpProfile({ mpId, mpName, onBack }) {
               {["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"].map((m, i) => <option key={m} value={i + 1} style={{ color: "#000" }}>{m}</option>)}
             </select>
             <input type="number" value={planYear} onChange={(e) => setPlanYear(Number(e.target.value))} className="bg-transparent border rounded px-2 py-1 text-sm w-20" style={{ borderColor: "#D3D8E4" }} />
+            {!canEditPlan && <span className="text-xs" style={{ color: "#6B7280" }}>(только просмотр — редактирует РМ)</span>}
           </div>
 
           <div className="grid sm:grid-cols-2 gap-3 mb-4">
             <div>
               <div className="text-xs uppercase mb-1" style={{ color: "#6B7280" }}>Сильные стороны</div>
-              <textarea rows={3} value={strengths} onChange={(e) => setStrengths(e.target.value)} className="w-full bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }} />
+              {canEditPlan ? (
+                <textarea rows={3} value={strengths} onChange={(e) => setStrengths(e.target.value)} className="w-full bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }} />
+              ) : <div className="text-sm rounded px-3 py-2" style={{ background: "#EEF1F8" }}>{strengths || "—"}</div>}
             </div>
             <div>
               <div className="text-xs uppercase mb-1" style={{ color: "#6B7280" }}>Слабые стороны</div>
-              <textarea rows={3} value={weaknesses} onChange={(e) => setWeaknesses(e.target.value)} className="w-full bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }} />
+              {canEditPlan ? (
+                <textarea rows={3} value={weaknesses} onChange={(e) => setWeaknesses(e.target.value)} className="w-full bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }} />
+              ) : <div className="text-sm rounded px-3 py-2" style={{ background: "#EEF1F8" }}>{weaknesses || "—"}</div>}
             </div>
           </div>
 
           <div className="mb-4">
             <div className="text-xs uppercase mb-2" style={{ color: "#6B7280" }}>KPI (исходное → цель → достигнуто)</div>
             {kpiRows.map((k, idx) => (
-              <div key={idx} className="grid grid-cols-5 gap-2 mb-2 text-sm items-center">
-                <input value={k.name} onChange={(e) => setKpiRows((r) => r.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))}
-                  placeholder="Название KPI" className="col-span-2 bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#D3D8E4" }} />
-                <input value={k.baseline} onChange={(e) => setKpiRows((r) => r.map((x, i) => i === idx ? { ...x, baseline: e.target.value } : x))}
-                  placeholder="Исходное" className="bg-transparent border rounded px-2 py-1.5 font-mono" style={{ borderColor: "#D3D8E4" }} />
-                <input value={k.target} onChange={(e) => setKpiRows((r) => r.map((x, i) => i === idx ? { ...x, target: e.target.value } : x))}
-                  placeholder="Цель" className="bg-transparent border rounded px-2 py-1.5 font-mono" style={{ borderColor: "#D3D8E4", color: "#ED3237" }} />
-                <input value={k.achieved} onChange={(e) => setKpiRows((r) => r.map((x, i) => i === idx ? { ...x, achieved: e.target.value } : x))}
-                  placeholder="Достигнуто" className="bg-transparent border rounded px-2 py-1.5 font-mono" style={{ borderColor: "#D3D8E4", color: "#16A34A" }} />
-              </div>
+              canEditPlan ? (
+                <div key={idx} className="grid grid-cols-5 gap-2 mb-2 text-sm items-center">
+                  <input value={k.name} onChange={(e) => setKpiRows((r) => r.map((x, i) => i === idx ? { ...x, name: e.target.value } : x))}
+                    placeholder="Название KPI" className="col-span-2 bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#D3D8E4" }} />
+                  <input value={k.baseline} onChange={(e) => setKpiRows((r) => r.map((x, i) => i === idx ? { ...x, baseline: e.target.value } : x))}
+                    placeholder="Исходное" className="bg-transparent border rounded px-2 py-1.5 font-mono" style={{ borderColor: "#D3D8E4" }} />
+                  <input value={k.target} onChange={(e) => setKpiRows((r) => r.map((x, i) => i === idx ? { ...x, target: e.target.value } : x))}
+                    placeholder="Цель" className="bg-transparent border rounded px-2 py-1.5 font-mono" style={{ borderColor: "#D3D8E4", color: "#ED3237" }} />
+                  <input value={k.achieved} onChange={(e) => setKpiRows((r) => r.map((x, i) => i === idx ? { ...x, achieved: e.target.value } : x))}
+                    placeholder="Достигнуто" className="bg-transparent border rounded px-2 py-1.5 font-mono" style={{ borderColor: "#D3D8E4", color: "#16A34A" }} />
+                </div>
+              ) : (
+                <div key={idx} className="grid grid-cols-4 gap-2 mb-2 text-sm rounded px-2 py-1.5" style={{ background: "#EEF1F8" }}>
+                  <span className="font-semibold">{k.name}</span>
+                  <span style={{ color: "#6B7280" }}>исх.: {k.baseline || "—"}</span>
+                  <span style={{ color: "#ED3237" }}>цель: {k.target || "—"}</span>
+                  <span style={{ color: "#16A34A" }}>достигнуто: {k.achieved || "—"}</span>
+                </div>
+              )
             ))}
-            <button onClick={() => setKpiRows((r) => [...r, { name: "", baseline: "", target: "", achieved: "" }])} className="text-xs px-3 py-1.5 rounded" style={{ background: "#E4E7F0" }}>+ добавить KPI</button>
+            {canEditPlan && <button onClick={() => setKpiRows((r) => [...r, { name: "", baseline: "", target: "", achieved: "" }])} className="text-xs px-3 py-1.5 rounded" style={{ background: "#E4E7F0" }}>+ добавить KPI</button>}
           </div>
 
           <div className="mb-4">
             <div className="text-xs uppercase mb-1" style={{ color: "#6B7280" }}>Комментарий РМ (итоги месяца)</div>
-            <textarea rows={3} value={rmComment} onChange={(e) => setRmComment(e.target.value)} className="w-full bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }} />
+            {canEditPlan ? (
+              <textarea rows={3} value={rmComment} onChange={(e) => setRmComment(e.target.value)} className="w-full bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }} />
+            ) : <div className="text-sm rounded px-3 py-2" style={{ background: "#EEF1F8" }}>{rmComment || "—"}</div>}
           </div>
 
           {error && <div className="text-sm mb-3" style={{ color: "#DC2626" }}>{error}</div>}
-          <button onClick={savePlan} disabled={busy} className="px-5 py-2.5 rounded font-semibold" style={{ background: "#16A34A", color: "#FFFFFF" }}>
-            {busy ? "Сохранение…" : "Сохранить план"}
-          </button>
+          {canEditPlan && (
+            <button onClick={savePlan} disabled={busy} className="px-5 py-2.5 rounded font-semibold" style={{ background: "#16A34A", color: "#FFFFFF" }}>
+              {busy ? "Сохранение…" : "Сохранить план"}
+            </button>
+          )}
 
           {profile.plans.length > 0 && (
             <div className="mt-6 pt-4 border-t" style={{ borderColor: "#E4E7F0" }}>

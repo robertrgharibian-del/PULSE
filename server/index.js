@@ -236,6 +236,15 @@ app.get("/api/users", auth, async (req, res) => {
     );
     return res.json(rows);
   }
+  if (req.user.role === "bm") {
+    const { rows } = await pool.query(
+      `select u.id, u.email, u.full_name, u.role, u.territory, u.rm_id, u.group_id, u.is_active, rm.full_name as rm_name, g.name as group_name
+       from users u left join users rm on rm.id = u.rm_id left join groups g on g.id = u.group_id
+       where u.group_id = $1 and u.role = 'mp' order by u.full_name`,
+      [req.user.group_id]
+    );
+    return res.json(rows);
+  }
   return res.status(403).json({ error: "Forbidden" });
 });
 
@@ -2280,10 +2289,14 @@ async function assertMpAccess(user, mpId) {
     const r = await pool.query("select rm_id from users where id=$1", [mpId]);
     return r.rows[0] && r.rows[0].rm_id === user.id;
   }
+  if (user.role === "bm") {
+    const r = await pool.query("select group_id from users where id=$1", [mpId]);
+    return r.rows[0] && r.rows[0].group_id === user.group_id;
+  }
   return false;
 }
 
-app.get("/api/mp-profile/:mpId", auth, requireRole("rm", "master"), async (req, res) => {
+app.get("/api/mp-profile/:mpId", auth, requireRole("rm", "master", "bm"), async (req, res) => {
   const { mpId } = req.params;
   if (!(await assertMpAccess(req.user, mpId))) return res.status(403).json({ error: "Forbidden" });
 
@@ -2334,10 +2347,30 @@ app.get("/api/mp-profile/:mpId", auth, requireRole("rm", "master"), async (req, 
     "select * from development_plans where mp_id=$1 order by period_year desc, period_month desc limit 12", [mpId]
   );
 
+  // ---- Latest approved report's Conversion / Potential / Sales-forecast snapshot ----
+  let latestDetail = null;
+  if (latestApproved) {
+    const convRes = await pool.query(
+      `select c.*, p.name as product_name, p.nrv_usd from report_conversion c join products p on p.id=c.product_id where c.report_id=$1`,
+      [latestApproved.id]
+    );
+    const potRes = await pool.query(
+      `select c.*, p.name as product_name, p.nrv_usd from report_potential c join products p on p.id=c.product_id where c.report_id=$1`,
+      [latestApproved.id]
+    );
+    const oppRes = await pool.query("select * from report_opportunities where report_id=$1", [latestApproved.id]);
+    latestDetail = {
+      period: `${latestApproved.period_month}/${latestApproved.period_year}`,
+      conversion_doctors: convRes.rows.length,
+      potential_doctors: potRes.rows.length,
+      opportunities: oppRes.rows.map((o) => o.name),
+    };
+  }
+
   res.json({
     mp: mpRes.rows[0], history, comments: commentsRes.rows,
     monthly: salesTrend?.months || [], quarterly: salesTrend?.quarterly || [], yearly: salesTrend?.yearly || [],
-    bonus, plans: plansRes.rows,
+    bonus, plans: plansRes.rows, latestDetail,
   });
 });
 
@@ -2360,20 +2393,32 @@ app.put("/api/development-plans/:mpId", auth, requireRole("rm"), async (req, res
 /* ============================================================
    DASHBOARD — visual org-wide (master) or team (rm) summary
    ============================================================ */
-app.get("/api/dashboard", auth, requireRole("master", "rm"), async (req, res) => {
-  const rmFilter = req.user.role === "rm" ? "and rm.id = $1" : "";
-  const params = req.user.role === "rm" ? [req.user.id] : [];
-
-  const rmsRes = await pool.query(
-    `select rm.id, rm.full_name, rm.territory from users rm where rm.role='rm' and rm.is_active=true ${rmFilter} order by rm.full_name`,
-    params
-  );
+app.get("/api/dashboard", auth, requireRole("master", "rm", "bm"), async (req, res) => {
+  let rmsRes;
+  if (req.user.role === "rm") {
+    rmsRes = await pool.query(
+      `select rm.id, rm.full_name, rm.territory from users rm where rm.role='rm' and rm.is_active=true and rm.id = $1 order by rm.full_name`,
+      [req.user.id]
+    );
+  } else if (req.user.role === "bm") {
+    rmsRes = await pool.query(
+      `select distinct rm.id, rm.full_name, rm.territory from users rm
+       join users mp on mp.rm_id = rm.id
+       where rm.role='rm' and rm.is_active=true and mp.group_id = $1 and mp.is_active=true
+       order by rm.full_name`,
+      [req.user.group_id]
+    );
+  } else {
+    rmsRes = await pool.query(`select rm.id, rm.full_name, rm.territory from users rm where rm.role='rm' and rm.is_active=true order by rm.full_name`);
+  }
 
   const hierarchy = [];
   let companyTarget = 0, companyActual = 0, companyBonusUzs = 0;
 
   for (const rm of rmsRes.rows) {
-    const mpsRes = await pool.query("select id, full_name, territory from users where rm_id=$1 and role='mp' and is_active=true order by full_name", [rm.id]);
+    const mpsRes = req.user.role === "bm"
+      ? await pool.query("select id, full_name, territory from users where rm_id=$1 and role='mp' and is_active=true and group_id=$2 order by full_name", [rm.id, req.user.group_id])
+      : await pool.query("select id, full_name, territory from users where rm_id=$1 and role='mp' and is_active=true order by full_name", [rm.id]);
     let rmTarget = 0, rmActual = 0;
     const mpNodes = [];
     for (const mp of mpsRes.rows) {
@@ -2607,7 +2652,7 @@ app.get("/api/reports/:id/export/xlsx", auth, async (req, res) => {
   if (!report) return;
   const data = await loadFullReport(rid);
 
-  const NAVY = "FF1F2937", GOLD = "FFE8B04B", GREEN = "FFC6EFCE", GREENFONT = "FF1B5E20", RED = "FFFDE0DF", REDFONT = "FFB71C1C", LIGHT = "FFF7F8FA";
+  const NAVY = "FF3E4095", GOLD = "FFED3237", GREEN = "FFC6EFCE", GREENFONT = "FF1B5E20", RED = "FFFDE0DF", REDFONT = "FFB71C1C", LIGHT = "FFF7F8FA";
   const headerFill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
   const headerFont = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
   const titleFont = { bold: true, size: 16, color: { argb: NAVY } };
@@ -2633,13 +2678,16 @@ app.get("/api/reports/:id/export/xlsx", auth, async (req, res) => {
 
   const wb = new ExcelJS.Workbook();
   wb.creator = "FSS Review Platform";
+  const logoId = wb.addImage({ filename: path.join(__dirname, "assets", "msn-logo.png"), extension: "png" });
 
   const ws1 = wb.addWorksheet("FSS", { views: [{ showGridLines: false }] });
-  ws1.mergeCells("A1:G1");
-  ws1.getCell("A1").value = `Отчёт FSS — ${data.mp.full_name}`;
-  ws1.getCell("A1").font = titleFont;
-  ws1.getCell("A2").value = `Территория: ${data.mp.territory || "—"}   ·   РМ: ${data.rm_name}   ·   Период: ${data.report.period_month}/${data.report.period_year}`;
-  ws1.getCell("A2").font = { italic: true, color: { argb: "FF6B7280" } };
+  ws1.addImage(logoId, { tl: { col: 0, row: 0 }, ext: { width: 130, height: 68 } });
+  ws1.mergeCells("C1:I1");
+  ws1.getCell("C1").value = `Отчёт FSS — ${data.mp.full_name}`;
+  ws1.getCell("C1").font = titleFont;
+  ws1.getCell("C2").value = `Территория: ${data.mp.territory || "—"}   ·   РМ: ${data.rm_name}   ·   Период: ${data.report.period_month}/${data.report.period_year}`;
+  ws1.getCell("C2").font = { italic: true, color: { argb: "FF6B7280" } };
+  ws1.getRow(1).height = 40;
   ws1.addRow([]);
   const h1 = ws1.addRow(["Препарат", "NRV $", "План, уп.", "Факт, уп.", "План, $", "Факт, $", "Дост., %"]);
   styleHeaderRow(h1);
@@ -2753,24 +2801,27 @@ app.get("/api/reports/:id/export/pptx", auth, async (req, res) => {
   const pptx = new PptxGenJS();
   pptx.defineLayout({ name: "WIDE", width: 13.33, height: 7.5 });
   pptx.layout = "WIDE";
-  // Light, clean theme
-  const BG = "FFFFFF", INK = "1F2937", MUTED = "6B7280", GOLD = "C58A1F", GREEN = "1B8A5A", RED = "C0392B", PANEL = "F3F4F6", LINE = "E5E7EB";
+  // Same palette as the website: MSN navy/red, light background, sans-serif
+  const BG = "FFFFFF", INK = "1F2937", MUTED = "6B7280", NAVY = "3E4095", GOLD = "ED3237", GREEN = "16A34A", RED = "DC2626", PANEL = "F7F8FC", LINE = "E4E7F0", ACCENT = "ED3237";
+  const MSN_LOGO = path.join(__dirname, "assets", "msn-logo.png");
 
   function chrome(s, title) {
     s.background = { color: BG };
-    s.addText(title, { x: 0.5, y: 0.3, fontSize: 22, bold: true, color: INK, fontFace: "Georgia" });
-    s.addShape(pptx.ShapeType.line, { x: 0.5, y: 0.85, w: 12.3, h: 0, line: { color: GOLD, width: 2 } });
+    s.addImage({ path: MSN_LOGO, x: 11.7, y: 0.25, w: 1.2, h: 0.6, sizing: { type: "contain", w: 1.2, h: 0.6 } });
+    s.addText(title, { x: 0.5, y: 0.3, fontSize: 22, bold: true, color: NAVY, fontFace: "Arial" });
+    s.addShape(pptx.ShapeType.line, { x: 0.5, y: 0.9, w: 10.8, h: 0, line: { color: ACCENT, width: 2 } });
   }
-  function achColor(pct) { if (pct === null || pct === undefined) return MUTED; return pct >= 0.9 ? GREEN : pct < 0.8 ? RED : GOLD; }
+  function achColor(pct) { if (pct === null || pct === undefined) return MUTED; return pct >= 0.9 ? GREEN : pct < 0.8 ? RED : ACCENT; }
 
   // ---- Slide 1: cover ----
   let s = pptx.addSlide();
   s.background = { color: BG };
   s.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 13.33, h: 7.5, fill: { color: PANEL } });
-  s.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.18, h: 7.5, fill: { color: GOLD } });
-  s.addText("Бизнес-ревью медпредставителя", { x: 0.9, y: 2.6, w: 11.5, h: 1, fontSize: 34, bold: true, color: INK, fontFace: "Georgia" });
-  s.addText(`${data.mp.full_name}   ·   ${data.mp.territory || "—"}`, { x: 0.9, y: 3.5, w: 11.5, h: 0.6, fontSize: 18, color: GOLD, bold: true });
-  s.addText(`РМ: ${data.rm_name}   ·   Период: ${data.report.period_month}/${data.report.period_year}`, { x: 0.9, y: 4.05, w: 11.5, h: 0.5, fontSize: 14, color: MUTED });
+  s.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.18, h: 7.5, fill: { color: ACCENT } });
+  s.addImage({ path: MSN_LOGO, x: 0.9, y: 0.6, w: 2.4, h: 1.2, sizing: { type: "contain", w: 2.4, h: 1.2 } });
+  s.addText("Бизнес-ревью медпредставителя", { x: 0.9, y: 2.6, w: 11.5, h: 1, fontSize: 34, bold: true, color: NAVY, fontFace: "Arial" });
+  s.addText(`${data.mp.full_name}   ·   ${data.mp.territory || "—"}`, { x: 0.9, y: 3.5, w: 11.5, h: 0.6, fontSize: 18, color: ACCENT, bold: true, fontFace: "Arial" });
+  s.addText(`РМ: ${data.rm_name}   ·   Период: ${data.report.period_month}/${data.report.period_year}`, { x: 0.9, y: 4.05, w: 11.5, h: 0.5, fontSize: 14, color: MUTED, fontFace: "Arial" });
 
   // ---- Slide 2: FSS summary table ----
   s = pptx.addSlide(); chrome(s, "FSS — план vs факт");

@@ -15,7 +15,7 @@ export default function TeamPage({ user }) {
     api.listGroups().then(setGroups);
   }, []);
 
-  if (selectedMp) return <MpProfile mpId={selectedMp.id} mpName={selectedMp.full_name} onBack={() => setSelectedMp(null)} />;
+  if (selectedMp) return <MpProfile mpId={selectedMp.id} mpName={selectedMp.full_name} user={user} onBack={() => setSelectedMp(null)} />;
 
   const mps = users.filter((u) => u.role === "mp");
   const byGroup = groups.map((g) => ({ group: g, mps: mps.filter((m) => m.group_id === g.id) }));
