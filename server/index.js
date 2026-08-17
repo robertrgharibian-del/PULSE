@@ -423,12 +423,12 @@ const CONFIDENTIALITY_NOTICE =
   "Информация, представленная в этом материале, является абсолютно конфиденциальной и не должна быть " +
   "использована, продемонстрирована в любых случаях и ситуациях, кроме как внутри компании MSN Laboratories.";
 
-async function portfolioScope(user) {
+async function portfolioScope(user, startIndex = 1) {
   if (user.role === "master") return { where: "1=1", values: [] };
-  if (user.role === "mp" || user.role === "bm") return { where: "p.group_id = $1", values: [user.group_id] };
+  if (user.role === "mp" || user.role === "bm") return { where: `p.group_id = $${startIndex}`, values: [user.group_id] };
   if (user.role === "rm") {
     return {
-      where: `p.group_id in (select distinct group_id from users where rm_id = $1 and group_id is not null)`,
+      where: `p.group_id in (select distinct group_id from users where rm_id = $${startIndex} and group_id is not null)`,
       values: [user.id],
     };
   }
@@ -467,7 +467,7 @@ app.post("/api/portfolio", auth, requireRole("master", "bm"), async (req, res) =
 
 app.get("/api/portfolio/:id", auth, async (req, res) => {
   const { id } = req.params;
-  const scope = await portfolioScope(req.user);
+  const scope = await portfolioScope(req.user, 2);
   const pRes = await pool.query(
     `select p.*, g.name as group_name from products p left join groups g on g.id=p.group_id where p.id=$1 and p.is_active=true and (${scope.where})`,
     [id, ...scope.values]
@@ -545,7 +545,7 @@ app.post("/api/portfolio/:id/files", auth, requireRole("master", "bm"), upload.s
 
 app.get("/api/portfolio/files/:fileId", auth, async (req, res) => {
   const { fileId } = req.params;
-  const scope = await portfolioScope(req.user);
+  const scope = await portfolioScope(req.user, 2);
   const fRes = await pool.query(
     `select f.*, p.group_id from product_files f join products p on p.id=f.product_id where f.id=$1 and (${scope.where})`,
     [fileId, ...scope.values]
@@ -605,7 +605,7 @@ app.delete("/api/portfolio/visual-aids/:vaId", auth, requireRole("master", "bm")
 
 app.get("/api/portfolio/visual-aids/:vaId/image", auth, async (req, res) => {
   const { vaId } = req.params;
-  const scope = await portfolioScope(req.user);
+  const scope = await portfolioScope(req.user, 2);
   const vRes = await pool.query(
     `select v.image_data, v.image_mime, v.image_name, p.group_id from product_visual_aids v join products p on p.id=v.product_id where v.id=$1 and (${scope.where})`,
     [vaId, ...scope.values]
@@ -667,7 +667,7 @@ app.delete("/api/portfolio/promo-materials/:pmId", auth, requireRole("master", "
 
 app.get("/api/portfolio/promo-materials/:pmId/file", auth, async (req, res) => {
   const { pmId } = req.params;
-  const scope = await portfolioScope(req.user);
+  const scope = await portfolioScope(req.user, 2);
   const mRes = await pool.query(
     `select m.file_data, m.file_mime, m.file_name, p.group_id from product_promo_materials m join products p on p.id=m.product_id where m.id=$1 and (${scope.where})`,
     [pmId, ...scope.values]
@@ -704,7 +704,7 @@ app.delete("/api/portfolio/scientific-info/:siId", auth, requireRole("master", "
 
 app.get("/api/portfolio/scientific-info/:siId/file", auth, async (req, res) => {
   const { siId } = req.params;
-  const scope = await portfolioScope(req.user);
+  const scope = await portfolioScope(req.user, 2);
   const sRes = await pool.query(
     `select s.file_data, s.file_mime, s.file_name, p.group_id from product_scientific_info s join products p on p.id=s.product_id where s.id=$1 and (${scope.where})`,
     [siId, ...scope.values]
@@ -958,7 +958,7 @@ async function loadPortfolioDetail(productId) {
 
 app.get("/api/portfolio/:id/brochure.pdf", auth, async (req, res) => {
   const { id } = req.params;
-  const scope = await portfolioScope(req.user);
+  const scope = await portfolioScope(req.user, 2);
   const check = await pool.query(`select p.id from products p where p.id=$1 and p.is_active=true and (${scope.where})`, [id, ...scope.values]);
   if (!check.rows[0]) return res.status(403).json({ error: "Forbidden" });
   const buffer = await buildProductBrochureBuffer(id);
@@ -2569,6 +2569,17 @@ async function loadFullReport(rid) {
   }
   const docTracking = Object.values(docTrackingByDoctor);
 
+  // Group by event/conference, for the DOC TRACKING slide
+  const docTrackingByEvent = {};
+  for (const d of docTracking) {
+    const key = d.event_name || "Без мероприятия";
+    docTrackingByEvent[key] ||= { event_name: key, doctors: [], qty: 0, usd: 0 };
+    docTrackingByEvent[key].doctors.push(d);
+    docTrackingByEvent[key].qty += d.qty;
+    docTrackingByEvent[key].usd += d.usd;
+  }
+  const docTrackingGrouped = Object.values(docTrackingByEvent);
+
   let targetUsd = 0, actualUsd = 0;
   const fssItems = fssRes.rows.map((r) => {
     const t = Number(r.target_qty) * Number(r.nrv_usd);
@@ -2603,6 +2614,36 @@ async function loadFullReport(rid) {
   const convPacks = packsImpact(convRes.rows, "current_rx_per_week");
   const potPacks = packsImpact(potRes.rows, "current_potential_per_week");
 
+  // ---- Per-SKU breakdown for the Conversion / Potential slides ----
+  function skuBreakdown(packsByProduct) {
+    const rows = Object.entries(packsByProduct)
+      .map(([pid, packs]) => ({ product_name: nameByProduct[pid] || "—", packs, usd: packs * (nrvByProduct[pid] || 0) }))
+      .filter((r) => r.packs > 0)
+      .sort((a, b) => b.usd - a.usd);
+    const totalPacks = rows.reduce((s, r) => s + r.packs, 0);
+    const totalUsd = rows.reduce((s, r) => s + r.usd, 0);
+    return { rows, totalPacks, totalUsd };
+  }
+  const nameByProduct = Object.fromEntries(fssItems.map((it) => [it.product_id, it.product_name]));
+  const conversionSkuBreakdown = skuBreakdown(convPacks);
+  const potentialSkuBreakdown = skuBreakdown(potPacks);
+
+  // ---- Marketing events & activities: plan vs actual for this report's month ----
+  const activityRes = await pool.query(
+    `select e.*, t.name as type_name, t.category as kind_category
+     from activity_entries e join activity_types t on t.id=e.activity_type_id
+     where e.mp_id=$1 and e.period_year=$2 and e.period_month=$3`,
+    [report.mp_id, report.period_year, report.period_month]
+  );
+  const activitiesByType = {};
+  for (const r of activityRes.rows) {
+    const key = `${r.kind_category}:${r.type_name}`;
+    activitiesByType[key] ||= { kind: r.kind_category, type_name: r.type_name, planned: 0, completed: 0 };
+    activitiesByType[key].planned += 1;
+    if (r.status === "completed") activitiesByType[key].completed += 1;
+  }
+  const activitiesSummary = Object.values(activitiesByType);
+
   const nextMonth = report.period_month === 12 ? 1 : report.period_month + 1;
   const nextYear = report.period_month === 12 ? report.period_year + 1 : report.period_year;
   const oppRes = await pool.query("select * from report_opportunities where report_id=$1", [rid]);
@@ -2631,7 +2672,8 @@ async function loadFullReport(rid) {
     report, mp: mpRes.rows[0], rm_name: rmRes.rows[0]?.full_name || "—",
     fssItems, targetUsd, actualUsd, achievement, rawBonusUzs, bonusUzs, bonusUsd: bonusUzs / Number(report.fx_rate),
     ffeItems, ffeScore, ffeGatePassed, actionPlan: apRes.rows, conversion: convRes.rows, potential: potRes.rows,
-    comments: commentsRes.rows, quarterBonus, docTracking,
+    conversionSkuBreakdown, potentialSkuBreakdown, activitiesSummary,
+    comments: commentsRes.rows, quarterBonus, docTracking, docTrackingGrouped,
     forecast, forecastTotalUsd, forecastTargetUsd, forecastPeriod: { year: nextYear, month: nextMonth },
     opportunities: oppRes.rows.map((o) => o.name),
   };
@@ -2869,54 +2911,109 @@ app.get("/api/reports/:id/export/pptx", auth, async (req, res) => {
       { text: `${(it.percent * 100).toFixed(0)}%`, options: { color: achColor(it.percent), bold: true, fill: { color: cellFill }, align: "right" } },
     ]);
   });
-  s.addTable(ffeRows, { x: 0.5, y: 1.6, w: 12.3, fontSize: 11, border: { color: LINE, pt: 0.5 }, autoPage: false });
+  s.addTable(ffeRows, { x: 0.5, y: 1.6, w: 6.1, fontSize: 10, border: { color: LINE, pt: 0.5 }, autoPage: false });
+  s.addChart(pptx.ChartType.bar, [
+    { name: "Достигнуто, %", labels: data.ffeItems.map((it) => it.label), values: data.ffeItems.map((it) => Math.round(it.percent * 100)) },
+  ], {
+    x: 6.9, y: 1.6, w: 5.9, h: 4.8,
+    barDir: "bar", chartColors: data.ffeItems.map((it) => achColor(it.percent)),
+    showLegend: false, showValue: true, dataLabelColor: INK, dataLabelFontSize: 9,
+    catAxisLabelColor: MUTED, catAxisLabelFontSize: 9, valAxisLabelColor: MUTED, valAxisLabelFontSize: 9,
+    valAxisMinVal: 0, valAxisMaxVal: 100,
+  });
 
-  // ---- Slide 4: results & comments (red/green) ----
+  // ---- Slide 4: results & comments (red/green), fixed layout so lines never overlap ----
   s = pptx.addSlide(); chrome(s, "Итоги: сильные и слабые бренды");
   const good = data.fssItems.filter((it) => it.target_usd && it.actual_usd / it.target_usd >= 0.9);
   const bad = data.fssItems.filter((it) => it.target_usd && it.actual_usd / it.target_usd < 0.8);
-  s.addText("✓ Выполнено (≥90%)", { x: 0.5, y: 1.0, fontSize: 14, bold: true, color: GREEN });
-  s.addText(good.length ? good.map((it) => `${it.product_name} — ${((it.actual_usd / it.target_usd) * 100).toFixed(0)}%`).join("\n") : "нет позиций", { x: 0.5, y: 1.4, w: 5.8, h: 4.8, fontSize: 10, color: INK, valign: "top" });
-  s.addText("✗ Не выполнено (<80%)", { x: 6.7, y: 1.0, fontSize: 14, bold: true, color: RED });
-  s.addText(bad.length ? bad.map((it) => `${it.product_name} — ${((it.actual_usd / it.target_usd) * 100).toFixed(0)}%`).join("\n") : "нет позиций", { x: 6.7, y: 1.4, w: 5.8, h: 2.2, fontSize: 10, color: INK, valign: "top" });
-  const badComments = data.comments.filter((c) => c.section === "fss").map((c) => `«${c.comment_text}» — ${c.author_name}`);
-  s.addText("Комментарии по причинам:", { x: 6.7, y: 3.7, fontSize: 11, bold: true, color: INK });
-  s.addText(badComments.length ? badComments.join("\n") : "комментариев пока нет", { x: 6.7, y: 4.1, w: 5.8, h: 2.5, fontSize: 9, color: MUTED, valign: "top" });
+  s.addText("✓ Выполнено (≥90%)", { x: 0.5, y: 1.0, w: 5.9, fontSize: 14, bold: true, color: GREEN });
+  const goodLines = good.length
+    ? good.map((it) => ({ text: `${it.product_name} — ${((it.actual_usd / it.target_usd) * 100).toFixed(0)}%\n`, options: { fontSize: 10, color: INK, breakLine: true } }))
+    : [{ text: "нет позиций", options: { fontSize: 10, color: MUTED } }];
+  s.addText(goodLines, { x: 0.5, y: 1.45, w: 5.9, h: 5.4, valign: "top", lineSpacingMultiple: 1.3 });
 
-  // ---- Slide 5: Конверсия ----
-  if (data.conversion.length > 0) {
-    s = pptx.addSlide(); chrome(s, "План конверсии врачей");
-    const convRows = [[
-      { text: "Препарат", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
-      { text: "Врач", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
-      { text: "Наш преп.", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
-      { text: "Конкур.", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
-      { text: "Цель", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+  s.addText("✗ Не выполнено (<80%)", { x: 6.9, y: 1.0, w: 5.9, fontSize: 14, bold: true, color: RED });
+  const badLines = bad.length
+    ? bad.map((it) => ({ text: `${it.product_name} — ${((it.actual_usd / it.target_usd) * 100).toFixed(0)}%\n`, options: { fontSize: 10, color: INK, breakLine: true } }))
+    : [{ text: "нет позиций", options: { fontSize: 10, color: MUTED } }];
+  s.addText(badLines, { x: 6.9, y: 1.45, w: 5.9, h: 2.6, valign: "top", lineSpacingMultiple: 1.3 });
+
+  const badComments = data.comments.filter((c) => c.section === "fss").map((c) => `«${c.comment_text}» — ${c.author_name}`);
+  s.addText("Комментарии по причинам:", { x: 6.9, y: 4.3, w: 5.9, fontSize: 11, bold: true, color: INK });
+  const commentLines = badComments.length
+    ? badComments.map((c) => ({ text: c + "\n", options: { fontSize: 9, color: MUTED, breakLine: true } }))
+    : [{ text: "комментариев пока нет", options: { fontSize: 9, color: MUTED } }];
+  s.addText(commentLines, { x: 6.9, y: 4.7, w: 5.9, h: 2.2, valign: "top", lineSpacingMultiple: 1.25 });
+
+  // ---- Slide 5: Конверсия — по отдельным SKU, упаковки + $ + итог ----
+  if (data.conversionSkuBreakdown.rows.length > 0) {
+    s = pptx.addSlide(); chrome(s, "План конверсии врачей — по SKU");
+    const convSkuRows = [[
+      { text: "Препарат (SKU)", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+      { text: "Доп. упаковок/мес", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+      { text: "Доп. бизнес, $/мес", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
     ]];
-    data.conversion.slice(0, 16).forEach((it) => convRows.push([
-      { text: it.product_name, options: { color: INK } }, { text: it.doctor_name, options: { color: INK } },
-      { text: String(it.current_rx_per_week), options: { color: MUTED, align: "right" } },
-      { text: String(it.competitor_rx_per_week), options: { color: RED, align: "right" } },
-      { text: String(it.target_rx_per_week), options: { color: GREEN, bold: true, align: "right" } },
+    data.conversionSkuBreakdown.rows.forEach((r) => convSkuRows.push([
+      { text: r.product_name, options: { color: INK } },
+      { text: `+${Math.round(r.packs).toLocaleString()}`, options: { color: GREEN, bold: true, align: "right" } },
+      { text: `+$${Math.round(r.usd).toLocaleString()}`, options: { color: GOLD, bold: true, align: "right" } },
     ]));
-    s.addTable(convRows, { x: 0.5, y: 1.0, w: 12.3, fontSize: 10, border: { color: LINE, pt: 0.5 }, autoPage: false });
+    convSkuRows.push([
+      { text: "ИТОГО за месяц", options: { bold: true, color: INK, fill: { color: PANEL } } },
+      { text: `+${Math.round(data.conversionSkuBreakdown.totalPacks).toLocaleString()}`, options: { bold: true, color: GREEN, align: "right", fill: { color: PANEL } } },
+      { text: `+$${Math.round(data.conversionSkuBreakdown.totalUsd).toLocaleString()}`, options: { bold: true, color: GOLD, align: "right", fill: { color: PANEL } } },
+    ]);
+    s.addTable(convSkuRows, { x: 0.5, y: 1.0, w: 8.5, fontSize: 11, border: { color: LINE, pt: 0.5 }, autoPage: false });
+    s.addShape(pptx.ShapeType.rect, { x: 9.3, y: 1.5, w: 3.5, h: 1.6, fill: { color: PANEL }, line: { color: LINE } });
+    s.addText("ДОПОЛНИТЕЛЬНЫЙ БИЗНЕС ЗА МЕСЯЦ", { x: 9.5, y: 1.65, w: 3.1, fontSize: 9, color: MUTED });
+    s.addText(`$${Math.round(data.conversionSkuBreakdown.totalUsd).toLocaleString()}`, { x: 9.5, y: 2.0, fontSize: 22, bold: true, color: GOLD });
   }
 
-  // ---- Slide 6: Потенциал ----
-  if (data.potential.length > 0) {
-    s = pptx.addSlide(); chrome(s, "План увеличения потенциала");
-    const potRows = [[
-      { text: "Препарат", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
-      { text: "Врач", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
-      { text: "Текущий потенциал", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
-      { text: "Цель", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+  // ---- Slide 6: Потенциал — по отдельным SKU, упаковки + $ + итог ----
+  if (data.potentialSkuBreakdown.rows.length > 0) {
+    s = pptx.addSlide(); chrome(s, "План увеличения потенциала — по SKU");
+    const potSkuRows = [[
+      { text: "Препарат (SKU)", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+      { text: "Доп. упаковок/мес", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+      { text: "Доп. бизнес, $/мес", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
     ]];
-    data.potential.slice(0, 16).forEach((it) => potRows.push([
-      { text: it.product_name, options: { color: INK } }, { text: it.doctor_name, options: { color: INK } },
-      { text: String(it.current_potential_per_week), options: { color: MUTED, align: "right" } },
-      { text: String(it.target_rx_per_week), options: { color: GREEN, bold: true, align: "right" } },
+    data.potentialSkuBreakdown.rows.forEach((r) => potSkuRows.push([
+      { text: r.product_name, options: { color: INK } },
+      { text: `+${Math.round(r.packs).toLocaleString()}`, options: { color: "7C3AED", bold: true, align: "right" } },
+      { text: `+$${Math.round(r.usd).toLocaleString()}`, options: { color: GOLD, bold: true, align: "right" } },
     ]));
-    s.addTable(potRows, { x: 0.5, y: 1.0, w: 12.3, fontSize: 10, border: { color: LINE, pt: 0.5 }, autoPage: false });
+    potSkuRows.push([
+      { text: "ИТОГО за месяц", options: { bold: true, color: INK, fill: { color: PANEL } } },
+      { text: `+${Math.round(data.potentialSkuBreakdown.totalPacks).toLocaleString()}`, options: { bold: true, color: "7C3AED", align: "right", fill: { color: PANEL } } },
+      { text: `+$${Math.round(data.potentialSkuBreakdown.totalUsd).toLocaleString()}`, options: { bold: true, color: GOLD, align: "right", fill: { color: PANEL } } },
+    ]);
+    s.addTable(potSkuRows, { x: 0.5, y: 1.0, w: 8.5, fontSize: 11, border: { color: LINE, pt: 0.5 }, autoPage: false });
+    s.addShape(pptx.ShapeType.rect, { x: 9.3, y: 1.5, w: 3.5, h: 1.6, fill: { color: PANEL }, line: { color: LINE } });
+    s.addText("ДОПОЛНИТЕЛЬНЫЙ БИЗНЕС ЗА МЕСЯЦ", { x: 9.5, y: 1.65, w: 3.1, fontSize: 9, color: MUTED });
+    s.addText(`$${Math.round(data.potentialSkuBreakdown.totalUsd).toLocaleString()}`, { x: 9.5, y: 2.0, fontSize: 22, bold: true, color: GOLD });
+  }
+
+  // ---- Slide 6b: Мероприятия и активности — план/факт ----
+  if (data.activitiesSummary.length > 0) {
+    s = pptx.addSlide(); chrome(s, "Мероприятия и активности — план/факт");
+    const actRows = [[
+      { text: "Тип", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+      { text: "Категория", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+      { text: "План", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+      { text: "Факт", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+      { text: "%", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+    ]];
+    data.activitiesSummary.forEach((a) => {
+      const pct = a.planned ? a.completed / a.planned : 0;
+      actRows.push([
+        { text: a.type_name, options: { color: INK } },
+        { text: a.kind === "event" ? "Мероприятие" : "Активность", options: { color: MUTED } },
+        { text: String(a.planned), options: { color: MUTED, align: "right" } },
+        { text: String(a.completed), options: { color: INK, bold: true, align: "right" } },
+        { text: `${(pct * 100).toFixed(0)}%`, options: { color: achColor(pct), bold: true, align: "right" } },
+      ]);
+    });
+    s.addTable(actRows, { x: 0.5, y: 1.0, w: 12.3, fontSize: 11, border: { color: LINE, pt: 0.5 }, autoPage: false });
   }
 
   // ---- Slide 7: Bonus detail ----
@@ -2939,21 +3036,27 @@ app.get("/api/reports/:id/export/pptx", auth, async (req, res) => {
   s.addText("ИТОГОВЫЙ БОНУС ЗА КВАРТАЛ", { x: 0.7, y: 5.25, fontSize: 11, color: MUTED });
   s.addText(`${Math.round(qb.bonus_uzs).toLocaleString()} UZS`, { x: 0.7, y: 5.55, fontSize: 24, bold: true, color: qb.bonus_uzs > 0 ? GOLD : RED });
 
-  // ---- Slide 8: DOC TRACKING ----
-  if (data.docTracking.length > 0) {
-    s = pptx.addSlide(); chrome(s, "DOC TRACKING — врачи после конференций");
+  // ---- Slide 8: DOC TRACKING — сгруппировано по мероприятиям ----
+  if (data.docTrackingGrouped.length > 0) {
+    s = pptx.addSlide(); chrome(s, "DOC TRACKING — врачи по мероприятиям");
     const docRows = [[
-      { text: "Врач", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
-      { text: "Мероприятие", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+      { text: "Мероприятие / Врач", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
       { text: "Упаковок", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
       { text: "Вклад, $", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
     ]];
-    data.docTracking.forEach((it) => docRows.push([
-      { text: it.doctor_name, options: { color: INK } }, { text: it.event_name || "—", options: { color: MUTED } },
-      { text: String(Math.round(it.qty)), options: { color: INK, align: "right" } },
-      { text: `$${Math.round(it.usd).toLocaleString()}`, options: { color: GREEN, bold: true, align: "right" } },
-    ]));
-    s.addTable(docRows, { x: 0.5, y: 1.0, w: 12.3, fontSize: 11, border: { color: LINE, pt: 0.5 }, autoPage: false });
+    data.docTrackingGrouped.forEach((grp) => {
+      docRows.push([
+        { text: grp.event_name, options: { bold: true, color: NAVY, fill: { color: PANEL } } },
+        { text: String(Math.round(grp.qty)), options: { bold: true, color: INK, align: "right", fill: { color: PANEL } } },
+        { text: `$${Math.round(grp.usd).toLocaleString()}`, options: { bold: true, color: GREEN, align: "right", fill: { color: PANEL } } },
+      ]);
+      grp.doctors.forEach((d) => docRows.push([
+        { text: `    ${d.doctor_name}`, options: { color: INK } },
+        { text: String(Math.round(d.qty)), options: { color: MUTED, align: "right" } },
+        { text: `$${Math.round(d.usd).toLocaleString()}`, options: { color: MUTED, align: "right" } },
+      ]));
+    });
+    s.addTable(docRows, { x: 0.5, y: 1.0, w: 12.3, fontSize: 10, border: { color: LINE, pt: 0.5 }, autoPage: false });
   }
 
   // ---- Slide 9: Ожидания по продажам на следующий месяц ----

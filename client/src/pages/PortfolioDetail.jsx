@@ -321,19 +321,33 @@ export default function PortfolioDetail({ productId, user, onBack }) {
   const [compDirect, setCompDirect] = useState(true);
   const [compPrice, setCompPrice] = useState("");
   const [deleted, setDeleted] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [pilProgress, setPilProgress] = useState(0);
   const [pilDone, setPilDone] = useState(false);
 
   async function load() {
-    const d = await api.getPortfolioItem(productId);
-    setData(d);
-    setName(d.product.name || "");
-    setNrvUsd(String(d.product.nrv_usd ?? ""));
-    setKeyMessages(d.product.key_messages || "");
-    setPositioning(d.product.positioning || "");
-    setPatientPortraits(d.product.patient_portraits || "");
+    try {
+      const d = await api.getPortfolioItem(productId);
+      setData(d);
+      setName(d.product.name || "");
+      setNrvUsd(String(d.product.nrv_usd ?? ""));
+      setKeyMessages(d.product.key_messages || "");
+      setPositioning(d.product.positioning || "");
+      setPatientPortraits(d.product.patient_portraits || "");
+    } catch (e) {
+      setLoadError(e.message);
+    }
   }
   useEffect(() => { load(); api.portfolioOptions().then(setOptions); }, [productId]);
+
+  if (loadError) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 sm:px-5 py-8">
+        <button onClick={onBack} className="text-sm mb-4" style={{ color: "#6B7280" }}>← Назад к портфолио</button>
+        <div className="text-sm px-3 py-2 rounded" style={{ background: "#DC262622", color: "#DC2626" }}>{loadError}</div>
+      </div>
+    );
+  }
 
   if (deleted) {
     return (
