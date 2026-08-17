@@ -4,6 +4,10 @@ import { api, authedDownload } from "../api.js";
 import Gauge from "./Gauge.jsx";
 import NumField, { toNum, toInputStr } from "./NumField.jsx";
 
+const SPECIALTIES = ["Кардиолог", "ВОП", "Терапевт", "Интервенционист", "Эндокринолог", "ЛОР", "Педиатр", "Аллерголог", "Пульмонолог", "Провизор"];
+const MONTH_NAMES = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"];
+function monthName(m) { return MONTH_NAMES[(m - 1 + 12) % 12]; }
+
 const STATUS_LABEL = {
   draft: { label: "Черновик", color: "#6B7280" },
   submitted: { label: "На рассмотрении у РМ", color: "#ED3237" },
@@ -79,6 +83,10 @@ export default function ReportView({ reportId, user, onBack }) {
   const [returnText, setReturnText] = useState("");
   const [quarterBonus, setQuarterBonus] = useState(null);
   const [fssLocked, setFssLocked] = useState(true);
+  const [newOppName, setNewOppName] = useState("");
+  const [oppValues, setOppValues] = useState({}); // { [oppId]: { [productId]: qtyStr } }
+  const [oppBusy, setOppBusy] = useState(false);
+  const [oppError, setOppError] = useState("");
   const [ffeLocked, setFfeLocked] = useState(true);
   const [convLocked, setConvLocked] = useState(true);
   const [potLocked, setPotLocked] = useState(true);
@@ -103,6 +111,12 @@ export default function ReportView({ reportId, user, onBack }) {
     setFfeLocked(d.ffe.items.some((i) => Number(i.master_list_count) > 0 || Number(i.achieved_count) > 0));
     setConvLocked(d.conversion.items.length > 0);
     setPotLocked(d.potential.items.length > 0);
+    const initOppValues = {};
+    (d.opportunities || []).forEach((o) => {
+      initOppValues[o.id] = {};
+      o.values.forEach((v) => { initOppValues[o.id][v.product_id] = toInputStr(v.qty_packages); });
+    });
+    setOppValues(initOppValues);
     const quarter = Math.floor((d.report.period_month - 1) / 3) + 1;
     api.mpBonus(d.report.mp_id, d.report.period_year, quarter).then(setQuarterBonus).catch(() => setQuarterBonus(null));
   }, [reportId]);
@@ -156,10 +170,12 @@ export default function ReportView({ reportId, user, onBack }) {
   async function saveFfe() {
     setBusy(true); setError("");
     try {
+      const daysInMonth = new Date(report.period_year, report.period_month, 0).getDate();
+      const computedFieldDays = fieldDays ? Math.max(0, daysInMonth - toNum(fieldDays.non_working_days) - toNum(fieldDays.public_holidays) - toNum(fieldDays.training_days) - toNum(fieldDays.leave_days)) : 0;
       await api.saveFfe(
         reportId,
         ffeRows.map((r) => ({ metric_key: r.metric_key, master_list_count: toNum(r.master_list_count), approved_count: toNum(r.approved_count), achieved_count: toNum(r.achieved_count) })),
-        fieldDays ? Object.fromEntries(Object.entries(fieldDays).map(([k, v]) => [k, toNum(v)])) : null
+        fieldDays ? { ...Object.fromEntries(Object.entries(fieldDays).map(([k, v]) => [k, toNum(v)])), total_days: daysInMonth, field_days: computedFieldDays } : null
       );
       await load();
     } catch (e) { setError(e.message); } finally { setBusy(false); }
@@ -182,7 +198,27 @@ export default function ReportView({ reportId, user, onBack }) {
       await load();
     } catch (e) { setError(e.message); } finally { setBusy(false); }
   }
+  async function addOpportunity() {
+    if (!newOppName.trim()) return;
+    setOppBusy(true); setOppError("");
+    try { await api.addOpportunity(reportId, newOppName.trim()); setNewOppName(""); await load(); }
+    catch (e) { setOppError(e.message); } finally { setOppBusy(false); }
+  }
+  async function saveOpportunityValues(oppId) {
+    setOppBusy(true); setOppError("");
+    try {
+      const values = Object.entries(oppValues[oppId] || {}).map(([product_id, qty]) => ({ product_id, qty_packages: toNum(qty) }));
+      await api.updateOpportunityValues(reportId, oppId, values);
+      await load();
+    } catch (e) { setOppError(e.message); } finally { setOppBusy(false); }
+  }
+  async function removeOpportunity(oppId) {
+    if (!confirm("Удалить эту возможность?")) return;
+    try { await api.deleteOpportunity(reportId, oppId); await load(); } catch (e) { setOppError(e.message); }
+  }
+
   async function submit() {
+    if (!confirm("Отправить отчёт на рассмотрение РМ? После отправки редактирование будет недоступно, пока РМ не вернёт отчёт на доработку.")) return;
     setBusy(true); setError("");
     try { await api.submitReport(reportId); await load(); } catch (e) { setError(e.message); } finally { setBusy(false); }
   }
@@ -211,7 +247,7 @@ export default function ReportView({ reportId, user, onBack }) {
       <div className="flex flex-wrap items-start justify-between gap-4 mb-6 pb-6 border-b" style={{ borderColor: "#E4E7F0" }}>
         <div>
           <div className="font-display text-xl sm:text-2xl font-semibold">{mp.full_name}</div>
-          <div className="text-sm" style={{ color: "#6B7280" }}>{mp.territory || "—"} · {report.period_month}/{report.period_year}</div>
+          <div className="text-sm" style={{ color: "#6B7280" }}>{mp.territory || "—"} · {monthName(report.period_month)} {report.period_year}</div>
           <span className="inline-block mt-2 text-xs px-2 py-1 rounded-full font-semibold" style={{ background: st.color + "22", color: st.color }}>{st.label}</span>
         </div>
         <div className="flex flex-col items-center">
@@ -224,7 +260,7 @@ export default function ReportView({ reportId, user, onBack }) {
 
       {/* Tabs — horizontally scrollable on mobile instead of overflowing */}
       <div className="flex gap-2 mb-5 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0" style={{ scrollbarWidth: "thin" }}>
-        {[["fss", "FSS"], ["ffe", "FFE"], ["conversion", "Конверсия"], ["potential", "Увеличение потенциала"], ["bonus", "Бонус"], ["comments", "История"]].map(([k, label]) => (
+        {[["fss", "FSS"], ["ffe", "FFE"], ["conversion", "Конверсия"], ["potential", "Увеличение потенциала"], ["forecast", `Ожидания на ${monthName(report.period_month === 12 ? 1 : report.period_month + 1)}`], ["bonus", "Бонус"], ["comments", "История"]].map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)}
             className="px-4 py-2 rounded-lg text-sm font-medium shrink-0"
             style={{ background: tab === k ? "#ED3237" : "#F7F8FC", color: tab === k ? "#FFFFFF" : "#374151", border: "1px solid #E4E7F0" }}>
@@ -469,19 +505,31 @@ export default function ReportView({ reportId, user, onBack }) {
             );})}
           </div>
 
-          {fieldDays && (
-            <div className="mt-5 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 text-xs">
-              {[["total_days", "Дней в месяце"], ["non_working_days", "Выходные"], ["public_holidays", "Праздники"], ["training_days", "Тренинги"], ["leave_days", "Отпуск/б.лист"], ["field_days", "Дней в поле"]].map(([k, label]) => (
-                <div key={k}>
-                  <div style={{ color: "#6B7280" }} className="mb-1">{label}</div>
-                  {ffeEditable ? (
-                    <NumField value={fieldDays[k] ?? ""} onChange={(v) => setFieldDays((f) => ({ ...f, [k]: v }))}
-                      className="w-full border rounded px-2 py-1 font-mono" style={inputStyle()} />
-                  ) : <div className="font-mono">{dispNum(fieldDays[k])}</div>}
+          {fieldDays && (() => {
+            const daysInMonth = new Date(report.period_year, report.period_month, 0).getDate();
+            const computedFieldDays = Math.max(0, daysInMonth - toNum(fieldDays.non_working_days) - toNum(fieldDays.public_holidays) - toNum(fieldDays.training_days) - toNum(fieldDays.leave_days));
+            return (
+              <div className="mt-5 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 text-xs">
+                <div>
+                  <div style={{ color: "#6B7280" }} className="mb-1">Дней в месяце</div>
+                  <div className="font-mono py-1">{daysInMonth} <span style={{ color: "#8B96AA" }}>(авто)</span></div>
                 </div>
-              ))}
-            </div>
-          )}
+                {[["non_working_days", "Выходные"], ["public_holidays", "Праздники"], ["training_days", "Тренинги"], ["leave_days", "Отпуск/б.лист"]].map(([k, label]) => (
+                  <div key={k}>
+                    <div style={{ color: "#6B7280" }} className="mb-1">{label}</div>
+                    {ffeEditable ? (
+                      <NumField value={fieldDays[k] ?? ""} onChange={(v) => setFieldDays((f) => ({ ...f, [k]: v }))}
+                        className="w-full border rounded px-2 py-1 font-mono" style={inputStyle()} />
+                    ) : <div className="font-mono">{dispNum(fieldDays[k])}</div>}
+                  </div>
+                ))}
+                <div>
+                  <div style={{ color: "#6B7280" }} className="mb-1">Дней в поле</div>
+                  <div className="font-mono py-1" style={{ color: "#16A34A" }}>{computedFieldDays} <span style={{ color: "#8B96AA" }}>(авто)</span></div>
+                </div>
+              </div>
+            );
+          })()}
           {liveFfeItems.some((i) => (i.approved_count > 0 || i.master_list_count > 0)) && (
             <div className="mt-5 rounded-xl p-3" style={{ background: "#EEF1F8" }}>
               <div className="text-xs uppercase mb-2" style={{ color: "#6B7280" }}>FFE — профиль по метрикам</div>
@@ -539,8 +587,11 @@ export default function ReportView({ reportId, user, onBack }) {
                 <div>
                   <div className="text-xs mb-1" style={{ color: "#6B7280" }}>Специальность врача</div>
                   {convEditable ? (
-                    <input value={row.doctor_specialty || ""} onChange={(e) => setConvRows((r) => r.map((x, i) => i === idx ? { ...x, doctor_specialty: e.target.value } : x))}
-                      className="w-full bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#D3D8E4" }} placeholder="Кардиолог, терапевт…" />
+                    <select value={row.doctor_specialty || ""} onChange={(e) => setConvRows((r) => r.map((x, i) => i === idx ? { ...x, doctor_specialty: e.target.value } : x))}
+                      className="w-full bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#D3D8E4" }}>
+                      <option value="" style={{ color: "#000" }}>— выбрать —</option>
+                      {SPECIALTIES.map((s) => <option key={s} value={s} style={{ color: "#000" }}>{s}</option>)}
+                    </select>
                   ) : <div>{row.doctor_specialty || "—"}</div>}
                 </div>
                 <div>
@@ -611,15 +662,15 @@ export default function ReportView({ reportId, user, onBack }) {
                     className="w-full bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#D3D8E4" }} /> : <div>{row.control_date ? String(row.control_date).slice(0, 10) : "—"}</div>}
                 </div>
               </div>
-              {convEditable && <button onClick={() => setConvRows((r) => r.filter((_, i) => i !== idx))} className="text-xs mt-2" style={{ color: "#DC2626" }}>Удалить врача</button>}
+              {editable && <button onClick={() => { setConvRows((r) => r.filter((_, i) => i !== idx)); setConvLocked(false); }} className="text-xs mt-2" style={{ color: "#DC2626" }}>Удалить врача</button>}
             </div>
           ))}
 
-          {convEditable && (
+          {editable && (
             <div className="flex flex-wrap gap-3 mb-6">
-              <button onClick={() => setConvRows((r) => [...r, { product_id: "", doctor_name: "", doctor_specialty: "", lpu_name: "", current_rx_per_week: "", competitor_rx_per_week: "", competitor_reason: "", mp_action_plan: "", target_rx_per_week: "", start_date: "", control_date: "" }])}
+              <button onClick={() => { setConvRows((r) => [...r, { product_id: "", doctor_name: "", doctor_specialty: "", lpu_name: "", current_rx_per_week: "", competitor_rx_per_week: "", competitor_reason: "", mp_action_plan: "", target_rx_per_week: "", start_date: "", control_date: "" }]); setConvLocked(false); }}
                 className="px-3 py-2 rounded text-sm" style={{ background: "#E4E7F0" }}>+ добавить врача</button>
-              <button onClick={async () => { await saveConversion(); setConvLocked(true); }} disabled={busy} className="px-4 py-2 rounded font-semibold" style={{ background: "#16A34A", color: "#FFFFFF" }}>Сохранить Конверсию</button>
+              {!convLocked && <button onClick={async () => { await saveConversion(); setConvLocked(true); }} disabled={busy} className="px-4 py-2 rounded font-semibold" style={{ background: "#16A34A", color: "#FFFFFF" }}>Сохранить Конверсию</button>}
             </div>
           )}
 
@@ -628,13 +679,18 @@ export default function ReportView({ reportId, user, onBack }) {
               <div className="text-sm font-semibold mb-2" style={{ color: "#374151" }}>Прогноз по брендам: база + конверсия</div>
               <table className="w-full text-sm">
                 <thead><tr style={{ color: "#6B7280", fontSize: 11 }} className="uppercase">
-                  <th className="text-left py-1">Препарат</th><th className="text-right px-2">База, $</th><th className="text-right px-2">+ Конверсия, $</th><th className="text-right">Итого, $</th>
+                  <th className="text-left py-1">Препарат</th>
+                  <th className="text-right px-2">База, уп.</th><th className="text-right px-2">+ Конв., уп.</th><th className="text-right px-2">Итого, уп.</th>
+                  <th className="text-right px-2">База, $</th><th className="text-right px-2">+ Конв., $</th><th className="text-right">Итого, $</th>
                 </tr></thead>
                 <tbody>
                   {detail.conversion.summary.map((s) => (
                     <tr key={s.product_id} style={{ borderTop: "1px solid #E4E7F0" }}>
                       <td className="py-1.5">{s.product_name}</td>
-                      <td className="text-right px-2 font-mono">{Math.round(s.base_usd).toLocaleString()}</td>
+                      <td className="text-right px-2 font-mono" style={{ color: "#6B7280" }}>{Math.round(s.base_packs).toLocaleString()}</td>
+                      <td className="text-right px-2 font-mono" style={{ color: "#16A34A" }}>+{Math.round(s.additional_packs).toLocaleString()}</td>
+                      <td className="text-right px-2 font-mono font-semibold">{Math.round(s.total_packs).toLocaleString()}</td>
+                      <td className="text-right px-2 font-mono" style={{ color: "#6B7280" }}>{Math.round(s.base_usd).toLocaleString()}</td>
                       <td className="text-right px-2 font-mono" style={{ color: "#16A34A" }}>+{Math.round(s.additional_usd).toLocaleString()}</td>
                       <td className="text-right font-mono font-semibold">{Math.round(s.total_usd).toLocaleString()}</td>
                     </tr>
@@ -697,8 +753,11 @@ export default function ReportView({ reportId, user, onBack }) {
                 <div>
                   <div className="text-xs mb-1" style={{ color: "#6B7280" }}>Специальность врача</div>
                   {potEditable ? (
-                    <input value={row.doctor_specialty || ""} onChange={(e) => setPotRows((r) => r.map((x, i) => i === idx ? { ...x, doctor_specialty: e.target.value } : x))}
-                      className="w-full bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#D3D8E4" }} placeholder="Кардиолог, терапевт…" />
+                    <select value={row.doctor_specialty || ""} onChange={(e) => setPotRows((r) => r.map((x, i) => i === idx ? { ...x, doctor_specialty: e.target.value } : x))}
+                      className="w-full bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#D3D8E4" }}>
+                      <option value="" style={{ color: "#000" }}>— выбрать —</option>
+                      {SPECIALTIES.map((s) => <option key={s} value={s} style={{ color: "#000" }}>{s}</option>)}
+                    </select>
                   ) : <div>{row.doctor_specialty || "—"}</div>}
                 </div>
                 <div>
@@ -764,15 +823,15 @@ export default function ReportView({ reportId, user, onBack }) {
                     className="w-full bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#D3D8E4" }} /> : <div>{row.control_date ? String(row.control_date).slice(0, 10) : "—"}</div>}
                 </div>
               </div>
-              {potEditable && <button onClick={() => setPotRows((r) => r.filter((_, i) => i !== idx))} className="text-xs mt-2" style={{ color: "#DC2626" }}>Удалить врача</button>}
+              {editable && <button onClick={() => { setPotRows((r) => r.filter((_, i) => i !== idx)); setPotLocked(false); }} className="text-xs mt-2" style={{ color: "#DC2626" }}>Удалить врача</button>}
             </div>
           ))}
 
-          {potEditable && (
+          {editable && (
             <div className="flex flex-wrap gap-3 mb-6">
-              <button onClick={() => setPotRows((r) => [...r, { product_id: "", doctor_name: "", doctor_specialty: "", lpu_name: "", current_potential_per_week: "", reason_not_treating: "", mp_action_plan: "", target_rx_per_week: "", start_date: "", control_date: "" }])}
+              <button onClick={() => { setPotRows((r) => [...r, { product_id: "", doctor_name: "", doctor_specialty: "", lpu_name: "", current_potential_per_week: "", reason_not_treating: "", mp_action_plan: "", target_rx_per_week: "", start_date: "", control_date: "" }]); setPotLocked(false); }}
                 className="px-3 py-2 rounded text-sm" style={{ background: "#E4E7F0" }}>+ добавить врача</button>
-              <button onClick={async () => { await savePotential(); setPotLocked(true); }} disabled={busy} className="px-4 py-2 rounded font-semibold" style={{ background: "#16A34A", color: "#FFFFFF" }}>Сохранить Потенциал</button>
+              {!potLocked && <button onClick={async () => { await savePotential(); setPotLocked(true); }} disabled={busy} className="px-4 py-2 rounded font-semibold" style={{ background: "#16A34A", color: "#FFFFFF" }}>Сохранить Потенциал</button>}
             </div>
           )}
 
@@ -781,13 +840,18 @@ export default function ReportView({ reportId, user, onBack }) {
               <div className="text-sm font-semibold mb-2" style={{ color: "#374151" }}>Прогноз по брендам: база + рост потенциала</div>
               <table className="w-full text-sm">
                 <thead><tr style={{ color: "#6B7280", fontSize: 11 }} className="uppercase">
-                  <th className="text-left py-1">Препарат</th><th className="text-right px-2">База, $</th><th className="text-right px-2">+ Потенциал, $</th><th className="text-right">Итого, $</th>
+                  <th className="text-left py-1">Препарат</th>
+                  <th className="text-right px-2">База, уп.</th><th className="text-right px-2">+ Потенц., уп.</th><th className="text-right px-2">Итого, уп.</th>
+                  <th className="text-right px-2">База, $</th><th className="text-right px-2">+ Потенц., $</th><th className="text-right">Итого, $</th>
                 </tr></thead>
                 <tbody>
                   {detail.potential.summary.map((s) => (
                     <tr key={s.product_id} style={{ borderTop: "1px solid #E4E7F0" }}>
                       <td className="py-1.5">{s.product_name}</td>
-                      <td className="text-right px-2 font-mono">{Math.round(s.base_usd).toLocaleString()}</td>
+                      <td className="text-right px-2 font-mono" style={{ color: "#6B7280" }}>{Math.round(s.base_packs).toLocaleString()}</td>
+                      <td className="text-right px-2 font-mono" style={{ color: "#16A34A" }}>+{Math.round(s.additional_packs).toLocaleString()}</td>
+                      <td className="text-right px-2 font-mono font-semibold">{Math.round(s.total_packs).toLocaleString()}</td>
+                      <td className="text-right px-2 font-mono" style={{ color: "#6B7280" }}>{Math.round(s.base_usd).toLocaleString()}</td>
                       <td className="text-right px-2 font-mono" style={{ color: "#16A34A" }}>+{Math.round(s.additional_usd).toLocaleString()}</td>
                       <td className="text-right font-mono font-semibold">{Math.round(s.total_usd).toLocaleString()}</td>
                     </tr>
@@ -810,6 +874,103 @@ export default function ReportView({ reportId, user, onBack }) {
           )}
         </div>
       )}
+      {/* SALES FORECAST TAB — база + конверсия + потенциал + возможности рынка */}
+      {tab === "forecast" && (
+        <div className="rounded-2xl p-4 sm:p-5" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
+          <div className="font-display text-lg mb-1">Ожидания по продажам на {monthName(detail.forecast.period_month)} {detail.forecast.period_year}</div>
+          <div className="text-xs mb-4" style={{ color: "#6B7280" }}>
+            База (текущие продажи) + воздействие Конверсии + воздействие Увеличения потенциала + Использование возможностей рынка
+          </div>
+
+          <div className="rounded-xl p-4 mb-4 flex flex-wrap items-center justify-between gap-3" style={{ background: "linear-gradient(90deg,#EEF1F8,#F7F8FC)" }}>
+            <div>
+              <div className="text-xs uppercase" style={{ color: "#6B7280" }}>Итоговое ожидание, $</div>
+              <div className="font-mono text-xl font-bold" style={{ color: "#ED3237" }}>${Math.round(detail.forecast.totals.total_usd).toLocaleString()}</div>
+            </div>
+            {detail.forecast.totals.next_target_usd > 0 && (
+              <>
+                <div>
+                  <div className="text-xs uppercase" style={{ color: "#6B7280" }}>План {monthName(detail.forecast.period_month)}, $</div>
+                  <div className="font-mono text-xl">${Math.round(detail.forecast.totals.next_target_usd).toLocaleString()}</div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase" style={{ color: "#6B7280" }}>Прогнозное выполнение</div>
+                  <div className="font-mono text-xl font-bold" style={{ color: achColor(detail.forecast.totals.achievement_pct) }}>{(detail.forecast.totals.achievement_pct * 100).toFixed(1)}%</div>
+                </div>
+              </>
+            )}
+            {!(detail.forecast.totals.next_target_usd > 0) && (
+              <div className="text-xs" style={{ color: "#8B96AA" }}>План на {monthName(detail.forecast.period_month)} ещё не загружен — % выполнения появится после загрузки таргетов мастером</div>
+            )}
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm mb-4">
+              <thead>
+                <tr style={{ color: "#6B7280", fontSize: 11 }} className="uppercase">
+                  <th className="text-left py-1">Препарат</th>
+                  <th className="text-right px-2">База, уп.</th>
+                  <th className="text-right px-2">+Конв.</th>
+                  <th className="text-right px-2">+Потенц.</th>
+                  {detail.opportunities.map((o) => <th key={o.id} className="text-right px-2">{o.name}</th>)}
+                  <th className="text-right px-2">Итого, уп.</th>
+                  <th className="text-right">Итого, $</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detail.forecast.items.map((f) => (
+                  <tr key={f.product_id} style={{ borderTop: "1px solid #E4E7F0" }}>
+                    <td className="py-1.5">{f.product_name}</td>
+                    <td className="text-right px-2 font-mono" style={{ color: "#6B7280" }}>{Math.round(f.base_packs).toLocaleString()}</td>
+                    <td className="text-right px-2 font-mono" style={{ color: "#16A34A" }}>{f.conv_packs ? `+${Math.round(f.conv_packs)}` : "—"}</td>
+                    <td className="text-right px-2 font-mono" style={{ color: "#7C3AED" }}>{f.pot_packs ? `+${Math.round(f.pot_packs)}` : "—"}</td>
+                    {detail.opportunities.map((o) => {
+                      const v = (o.values.find((x) => x.product_id === f.product_id) || {}).qty_packages;
+                      return <td key={o.id} className="text-right px-2 font-mono" style={{ color: "#ED3237" }}>{v ? `+${Math.round(v)}` : "—"}</td>;
+                    })}
+                    <td className="text-right px-2 font-mono font-semibold">{Math.round(f.total_packs).toLocaleString()}</td>
+                    <td className="text-right font-mono font-semibold">${Math.round(f.total_usd).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="font-display text-base mb-3">Возможности на рынке</div>
+          {detail.opportunities.map((o) => (
+            <div key={o.id} className="rounded-xl p-3 mb-3" style={{ background: "#EEF1F8" }}>
+              <div className="flex items-center justify-between mb-2">
+                <div className="font-semibold text-sm">{o.name}</div>
+                {editable && <button onClick={() => removeOpportunity(o.id)} className="text-xs" style={{ color: "#DC2626" }}>Удалить возможность</button>}
+              </div>
+              <div className="grid sm:grid-cols-2 gap-2">
+                {detail.fss.items.map((it) => (
+                  <div key={it.product_id} className="flex items-center gap-2 text-sm">
+                    <span className="flex-1">{it.product_name}</span>
+                    {editable ? (
+                      <NumField value={oppValues[o.id]?.[it.product_id] ?? ""} onChange={(v) => setOppValues((s) => ({ ...s, [o.id]: { ...s[o.id], [it.product_id]: v } }))}
+                        className="w-20 border rounded px-2 py-1 font-mono text-xs" style={inputStyle()} />
+                    ) : (
+                      <span className="font-mono text-xs">{dispNum((o.values.find((x) => x.product_id === it.product_id) || {}).qty_packages)}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {editable && <button onClick={() => saveOpportunityValues(o.id)} disabled={oppBusy} className="mt-2 px-3 py-1.5 rounded text-xs font-semibold" style={{ background: "#16A34A", color: "#FFFFFF" }}>Сохранить цифры</button>}
+            </div>
+          ))}
+
+          {editable && (
+            <div className="flex flex-wrap gap-2 items-center">
+              <input value={newOppName} onChange={(e) => setNewOppName(e.target.value)} placeholder="Название возможности"
+                className="border rounded px-2 py-1.5 text-sm flex-1" style={{ borderColor: "#D3D8E4", minWidth: "200px" }} />
+              <button onClick={addOpportunity} disabled={oppBusy} className="px-4 py-1.5 rounded text-sm font-semibold" style={{ background: "#ED3237", color: "#FFFFFF" }}>+ Добавить возможность</button>
+            </div>
+          )}
+          {oppError && <div className="text-xs mt-2" style={{ color: "#DC2626" }}>{oppError}</div>}
+        </div>
+      )}
+
       {tab === "bonus" && (
         <div className="rounded-2xl p-4 sm:p-5" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
           <div className="font-display text-lg mb-1">Квартальный бонус (Q{Math.floor((report.period_month - 1) / 3) + 1}, {report.period_year})</div>

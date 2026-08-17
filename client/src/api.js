@@ -131,6 +131,9 @@ export const api = {
   getReport: (id) => request(`/api/reports/${id}`),
   saveFss: (id, items) => request(`/api/reports/${id}/fss`, { method: "PUT", body: { items } }),
   saveFfe: (id, items, field_days) => request(`/api/reports/${id}/ffe`, { method: "PUT", body: { items, field_days } }),
+  addOpportunity: (reportId, name) => request(`/api/reports/${reportId}/opportunities`, { method: "POST", body: { name } }),
+  updateOpportunityValues: (reportId, oppId, values) => request(`/api/reports/${reportId}/opportunities/${oppId}`, { method: "PUT", body: { values } }),
+  deleteOpportunity: (reportId, oppId) => request(`/api/reports/${reportId}/opportunities/${oppId}`, { method: "DELETE" }),
   saveActionPlan: (id, items) => request(`/api/reports/${id}/action-plan`, { method: "PUT", body: { items } }),
   saveConversion: (id, items) => request(`/api/reports/${id}/conversion`, { method: "PUT", body: { items } }),
   savePotential: (id, items) => request(`/api/reports/${id}/potential`, { method: "PUT", body: { items } }),
@@ -183,3 +186,6 @@ export function authedDownload(url) {
     URL.revokeObjectURL(a.href);
   });
 }
+
+export const MONTH_NAMES_RU = ["январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"];
+export function monthName(m) { return MONTH_NAMES_RU[(m - 1 + 12) % 12]; }

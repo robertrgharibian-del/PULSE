@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { api } from "../api.js";
+import { api, monthName } from "../api.js";
 import ReportView from "../components/ReportView.jsx";
 import { useLanguage } from "../i18n/LanguageContext.jsx";
 
@@ -39,7 +39,7 @@ export default function BmReports({ user }) {
                 <tr key={r.id} style={{ borderTop: "1px solid #E4E7F0" }}>
                   <td className="px-4 py-3">{r.mp_name}</td>
                   <td className="px-4 py-3" style={{ color: "#6B7280" }}>{r.mp_territory || "—"}</td>
-                  <td className="px-4 py-3 font-mono">{r.period_month}/{r.period_year}</td>
+                  <td className="px-4 py-3 font-mono">{monthName(r.period_month)} {r.period_year}</td>
                   <td className="px-4 py-3 text-right"><button onClick={() => setReportId(r.id)} className="px-3 py-1.5 rounded" style={{ background: "#E4E7F0" }}>{t("common.open")}</button></td>
                 </tr>
               ))}

@@ -97,6 +97,9 @@ function bonusFor(achievement, baseRate) {
   if (achievement <= 1.25) return baseRate * achievement;
   return baseRate * 1.25;
 }
+const MONTH_NAMES_RU = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"];
+function monthNameRu(m) { return MONTH_NAMES_RU[(m - 1 + 12) % 12]; }
+
 function tierLabel(achievement) {
   if (achievement < 0.9) return "Нет бонуса (<90%)";
   if (achievement < 1.0) return "60% ставки (90-99.99%)";
@@ -1554,6 +1557,19 @@ app.get("/api/reports/:id", auth, async (req, res) => {
      join users u on u.id = l.actor_id where l.report_id=$1 order by l.created_at`, [rid]
   );
 
+  // ---- Market opportunities (manual packages-impact estimates) ----
+  const oppRes = await pool.query("select * from report_opportunities where report_id=$1 order by created_at", [rid]);
+  const oppValuesRes = oppRes.rows.length
+    ? await pool.query(
+        `select ov.*, p.name as product_name from report_opportunity_values ov join products p on p.id=ov.product_id where ov.opportunity_id = any($1::bigint[])`,
+        [oppRes.rows.map((o) => o.id)]
+      )
+    : { rows: [] };
+  const opportunities = oppRes.rows.map((o) => ({
+    ...o,
+    values: oppValuesRes.rows.filter((v) => v.opportunity_id === o.id),
+  }));
+
   // ---- computed FSS totals ----
   let targetUsd = 0, actualUsd = 0;
   const fssItems = fssRes.rows.map((row) => {
@@ -1603,6 +1619,54 @@ app.get("/api/reports/:id", auth, async (req, res) => {
     });
   }
 
+  const convSummary = buildBrandSummary(convRes.rows, "current_rx_per_week");
+  const potSummary = buildBrandSummary(potRes.rows, "current_potential_per_week");
+
+  // ---- Next-month sales forecast: base + conversion + potential + opportunities ----
+  const nextMonth = report.period_month === 12 ? 1 : report.period_month + 1;
+  const nextYear = report.period_month === 12 ? report.period_year + 1 : report.period_year;
+  const nextReportRes = await pool.query(
+    "select id from reports where mp_id=$1 and period_year=$2 and period_month=$3", [report.mp_id, nextYear, nextMonth]
+  );
+  let nextTargetByProduct = {};
+  if (nextReportRes.rows[0]) {
+    const nextFssRes = await pool.query(
+      `select f.product_id, f.target_qty, p.nrv_usd from report_fss f join products p on p.id=f.product_id where f.report_id=$1`,
+      [nextReportRes.rows[0].id]
+    );
+    for (const r of nextFssRes.rows) nextTargetByProduct[r.product_id] = { qty: Number(r.target_qty), usd: Number(r.target_qty) * Number(r.nrv_usd) };
+  }
+
+  const convByProduct = Object.fromEntries(convSummary.map((s) => [s.product_id, s.additional_packs]));
+  const potByProduct = Object.fromEntries(potSummary.map((s) => [s.product_id, s.additional_packs]));
+  const oppByProduct = {};
+  for (const o of opportunities) {
+    for (const v of o.values) {
+      oppByProduct[v.product_id] = (oppByProduct[v.product_id] || 0) + Number(v.qty_packages);
+    }
+  }
+  const forecast = fssItems.map((it) => {
+    const base_packs = Number(it.actual_qty);
+    const conv_packs = convByProduct[it.product_id] || 0;
+    const pot_packs = potByProduct[it.product_id] || 0;
+    const opp_packs = oppByProduct[it.product_id] || 0;
+    const total_packs = base_packs + conv_packs + pot_packs + opp_packs;
+    const nrv = Number(it.nrv_usd);
+    const nextTarget = nextTargetByProduct[it.product_id];
+    return {
+      product_id: it.product_id, product_name: it.product_name, nrv_usd: nrv,
+      base_packs, conv_packs, pot_packs, opp_packs, total_packs,
+      base_usd: base_packs * nrv, conv_usd: conv_packs * nrv, pot_usd: pot_packs * nrv, opp_usd: opp_packs * nrv, total_usd: total_packs * nrv,
+      next_target_qty: nextTarget ? nextTarget.qty : null, next_target_usd: nextTarget ? nextTarget.usd : null,
+      achievement_pct: nextTarget && nextTarget.usd ? (total_packs * nrv) / nextTarget.usd : null,
+    };
+  });
+  const forecastTotals = forecast.reduce((s, f) => ({
+    base_usd: s.base_usd + f.base_usd, conv_usd: s.conv_usd + f.conv_usd, pot_usd: s.pot_usd + f.pot_usd, opp_usd: s.opp_usd + f.opp_usd,
+    total_usd: s.total_usd + f.total_usd, next_target_usd: s.next_target_usd + (f.next_target_usd || 0),
+  }), { base_usd: 0, conv_usd: 0, pot_usd: 0, opp_usd: 0, total_usd: 0, next_target_usd: 0 });
+  forecastTotals.achievement_pct = forecastTotals.next_target_usd ? forecastTotals.total_usd / forecastTotals.next_target_usd : null;
+
   res.json({
     report,
     mp: mpRes.rows[0],
@@ -1618,11 +1682,58 @@ app.get("/api/reports/:id", auth, async (req, res) => {
     ffe: { items: ffeItems, score: ffeScore, gate_passed: ffeGatePassed, gate_threshold: FFE_GATE },
     field_days: fieldDaysRes.rows[0],
     action_plan: apRes.rows,
-    conversion: { items: convRes.rows, summary: buildBrandSummary(convRes.rows, "current_rx_per_week") },
-    potential: { items: potRes.rows, summary: buildBrandSummary(potRes.rows, "current_potential_per_week") },
+    conversion: { items: convRes.rows, summary: convSummary },
+    potential: { items: potRes.rows, summary: potSummary },
+    opportunities,
+    forecast: { items: forecast, totals: forecastTotals, period_year: nextYear, period_month: nextMonth },
     comments: commentsRes.rows,
     status_log: logRes.rows,
   });
+});
+
+/* ---- Market opportunities: MP adds an opportunity, then fills in per-product packages impact ---- */
+app.post("/api/reports/:id/opportunities", auth, requireRole("mp"), async (req, res) => {
+  const rid = req.params.id;
+  const rRes = await pool.query("select * from reports where id=$1 and mp_id=$2", [rid, req.user.id]);
+  const report = rRes.rows[0];
+  if (!report) return res.status(404).json({ error: "Не найдено" });
+  if (!assertEditable(report, res)) return;
+  const { name } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: "Укажите название возможности" });
+  const { rows } = await pool.query(
+    "insert into report_opportunities (report_id, name, created_by) values ($1,$2,$3) returning *",
+    [rid, name.trim(), req.user.id]
+  );
+  res.json({ ...rows[0], values: [] });
+});
+
+app.put("/api/reports/:id/opportunities/:oppId", auth, requireRole("mp"), async (req, res) => {
+  const { id: rid, oppId } = req.params;
+  const rRes = await pool.query("select * from reports where id=$1 and mp_id=$2", [rid, req.user.id]);
+  const report = rRes.rows[0];
+  if (!report) return res.status(404).json({ error: "Не найдено" });
+  if (!assertEditable(report, res)) return;
+  const check = await pool.query("select id from report_opportunities where id=$1 and report_id=$2", [oppId, rid]);
+  if (!check.rows[0]) return res.status(404).json({ error: "Возможность не найдена" });
+  const { values } = req.body; // [{product_id, qty_packages}]
+  for (const v of values || []) {
+    await pool.query(
+      `insert into report_opportunity_values (opportunity_id, product_id, qty_packages) values ($1,$2,$3)
+       on conflict (opportunity_id, product_id) do update set qty_packages=excluded.qty_packages`,
+      [oppId, v.product_id, v.qty_packages || 0]
+    );
+  }
+  res.json({ ok: true });
+});
+
+app.delete("/api/reports/:id/opportunities/:oppId", auth, requireRole("mp"), async (req, res) => {
+  const { id: rid, oppId } = req.params;
+  const rRes = await pool.query("select * from reports where id=$1 and mp_id=$2", [rid, req.user.id]);
+  const report = rRes.rows[0];
+  if (!report) return res.status(404).json({ error: "Не найдено" });
+  if (!assertEditable(report, res)) return;
+  await pool.query("delete from report_opportunities where id=$1 and report_id=$2", [oppId, rid]);
+  res.json({ ok: true });
 });
 
 /* ---- MP updates: FSS / FFE / action plan / settings (only draft/returned) ---- */
@@ -2433,11 +2544,51 @@ async function loadFullReport(rid) {
   const bonusUzs = (ffeGatePassed && report.non_reimbursement_ok) ? rawBonusUzs : 0;
   const quarterBonus = await computeMpQuarterBonus(report.mp_id, report.period_year, quarterOf(report.period_month));
 
+  // ---- Sales forecast for next month (base + conversion + potential + opportunities) ----
+  const WEEKS_PER_MONTH_EXP = 4.33;
+  const nrvByProduct = Object.fromEntries(fssItems.map((it) => [it.product_id, Number(it.nrv_usd)]));
+  function packsImpact(rows, currentField) {
+    const byProduct = {};
+    for (const r of rows) {
+      const delta = Math.max(0, Number(r.target_rx_per_week) - Number(r[currentField]));
+      byProduct[r.product_id] = (byProduct[r.product_id] || 0) + delta * WEEKS_PER_MONTH_EXP;
+    }
+    return byProduct;
+  }
+  const convPacks = packsImpact(convRes.rows, "current_rx_per_week");
+  const potPacks = packsImpact(potRes.rows, "current_potential_per_week");
+
+  const nextMonth = report.period_month === 12 ? 1 : report.period_month + 1;
+  const nextYear = report.period_month === 12 ? report.period_year + 1 : report.period_year;
+  const oppRes = await pool.query("select * from report_opportunities where report_id=$1", [rid]);
+  const oppValuesRes = oppRes.rows.length
+    ? await pool.query("select * from report_opportunity_values where opportunity_id = any($1::bigint[])", [oppRes.rows.map((o) => o.id)])
+    : { rows: [] };
+  const oppPacks = {};
+  for (const v of oppValuesRes.rows) oppPacks[v.product_id] = (oppPacks[v.product_id] || 0) + Number(v.qty_packages);
+
+  const nextReportRes = await pool.query("select id from reports where mp_id=$1 and period_year=$2 and period_month=$3", [report.mp_id, nextYear, nextMonth]);
+  let nextTargetUsdByProduct = {};
+  if (nextReportRes.rows[0]) {
+    const nf = await pool.query(`select f.product_id, f.target_qty, p.nrv_usd from report_fss f join products p on p.id=f.product_id where f.report_id=$1`, [nextReportRes.rows[0].id]);
+    for (const r of nf.rows) nextTargetUsdByProduct[r.product_id] = Number(r.target_qty) * Number(r.nrv_usd);
+  }
+  const forecast = fssItems.map((it) => {
+    const base_packs = Number(it.actual_qty);
+    const total_packs = base_packs + (convPacks[it.product_id] || 0) + (potPacks[it.product_id] || 0) + (oppPacks[it.product_id] || 0);
+    const total_usd = total_packs * Number(it.nrv_usd);
+    return { product_name: it.product_name, base_packs, total_packs, total_usd, next_target_usd: nextTargetUsdByProduct[it.product_id] || 0 };
+  });
+  const forecastTotalUsd = forecast.reduce((s, f) => s + f.total_usd, 0);
+  const forecastTargetUsd = forecast.reduce((s, f) => s + f.next_target_usd, 0);
+
   return {
     report, mp: mpRes.rows[0], rm_name: rmRes.rows[0]?.full_name || "—",
     fssItems, targetUsd, actualUsd, achievement, rawBonusUzs, bonusUzs, bonusUsd: bonusUzs / Number(report.fx_rate),
     ffeItems, ffeScore, ffeGatePassed, actionPlan: apRes.rows, conversion: convRes.rows, potential: potRes.rows,
     comments: commentsRes.rows, quarterBonus, docTracking,
+    forecast, forecastTotalUsd, forecastTargetUsd, forecastPeriod: { year: nextYear, month: nextMonth },
+    opportunities: oppRes.rows.map((o) => o.name),
   };
 }
 
@@ -2563,6 +2714,29 @@ app.get("/api/reports/:id/export/xlsx", auth, async (req, res) => {
     totalRow.font = { bold: true };
   }
   ws6.columns.forEach((c) => (c.width = 28));
+
+  const ws7 = wb.addWorksheet(`Ожидания ${monthNameRu(data.forecastPeriod.month)}`, { views: [{ showGridLines: false }] });
+  ws7.mergeCells("A1:E1");
+  ws7.getCell("A1").value = `Ожидания по продажам на ${monthNameRu(data.forecastPeriod.month)} ${data.forecastPeriod.year}`;
+  ws7.getCell("A1").font = titleFont;
+  if (data.opportunities.length > 0) {
+    ws7.getCell("A2").value = `Учтённые возможности рынка: ${data.opportunities.join(", ")}`;
+    ws7.getCell("A2").font = { italic: true, color: { argb: "FF6B7280" } };
+  }
+  ws7.addRow([]);
+  styleHeaderRow(ws7.addRow(["Препарат", "База, уп.", "Итого (прогноз), уп.", "Итого (прогноз), $", "План след. месяца, $"]));
+  data.forecast.forEach((f) => {
+    const row = ws7.addRow([f.product_name, Math.round(f.base_packs), Math.round(f.total_packs), Math.round(f.total_usd), Math.round(f.next_target_usd)]);
+    row.eachCell((c) => (c.border = border));
+  });
+  const forecastTotalRow = ws7.addRow(["ИТОГО", "", "", Math.round(data.forecastTotalUsd), Math.round(data.forecastTargetUsd)]);
+  forecastTotalRow.font = { bold: true };
+  if (data.forecastTargetUsd > 0) {
+    const achRow = ws7.addRow(["Прогнозное выполнение", "", "", "", data.forecastTotalUsd / data.forecastTargetUsd]);
+    achRow.getCell(5).numFmt = "0.0%";
+    achRow.font = { bold: true };
+  }
+  ws7.columns.forEach((c) => (c.width = 26));
 
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", `attachment; filename="report_${rid}.xlsx"`);
@@ -2729,6 +2903,37 @@ app.get("/api/reports/:id/export/pptx", auth, async (req, res) => {
       { text: `$${Math.round(it.usd).toLocaleString()}`, options: { color: GREEN, bold: true, align: "right" } },
     ]));
     s.addTable(docRows, { x: 0.5, y: 1.0, w: 12.3, fontSize: 11, border: { color: LINE, pt: 0.5 }, autoPage: false });
+  }
+
+  // ---- Slide 9: Ожидания по продажам на следующий месяц ----
+  s = pptx.addSlide(); chrome(s, `Ожидания по продажам на ${monthNameRu(data.forecastPeriod.month)} ${data.forecastPeriod.year}`);
+  if (data.opportunities.length > 0) {
+    s.addText(`Учтённые возможности рынка: ${data.opportunities.join(", ")}`, { x: 0.5, y: 1.0, fontSize: 11, italic: true, color: MUTED });
+  }
+  const forecastRows = [[
+    { text: "Препарат", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+    { text: "База, уп.", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+    { text: "Прогноз, уп.", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+    { text: "Прогноз, $", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+    { text: "План, $", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+  ]];
+  data.forecast.forEach((f) => forecastRows.push([
+    { text: f.product_name, options: { color: INK } },
+    { text: String(Math.round(f.base_packs)), options: { color: MUTED, align: "right" } },
+    { text: String(Math.round(f.total_packs)), options: { color: INK, bold: true, align: "right" } },
+    { text: `$${Math.round(f.total_usd).toLocaleString()}`, options: { color: GOLD, bold: true, align: "right" } },
+    { text: f.next_target_usd ? `$${Math.round(f.next_target_usd).toLocaleString()}` : "—", options: { color: MUTED, align: "right" } },
+  ]));
+  s.addTable(forecastRows, { x: 0.5, y: data.opportunities.length > 0 ? 1.4 : 1.0, w: 12.3, fontSize: 10, border: { color: LINE, pt: 0.5 }, autoPage: false });
+
+  s.addShape(pptx.ShapeType.rect, { x: 0.5, y: 5.7, w: 5.5, h: 1.1, fill: { color: PANEL }, line: { color: LINE } });
+  s.addText("ИТОГОВОЕ ОЖИДАНИЕ", { x: 0.7, y: 5.82, fontSize: 10, color: MUTED });
+  s.addText(`$${Math.round(data.forecastTotalUsd).toLocaleString()}`, { x: 0.7, y: 6.05, fontSize: 20, bold: true, color: GOLD });
+  if (data.forecastTargetUsd > 0) {
+    const pct = (data.forecastTotalUsd / data.forecastTargetUsd) * 100;
+    s.addShape(pptx.ShapeType.rect, { x: 6.3, y: 5.7, w: 5.5, h: 1.1, fill: { color: PANEL }, line: { color: LINE } });
+    s.addText("ПРОГНОЗНОЕ ВЫПОЛНЕНИЕ", { x: 6.5, y: 5.82, fontSize: 10, color: MUTED });
+    s.addText(`${pct.toFixed(1)}%`, { x: 6.5, y: 6.05, fontSize: 20, bold: true, color: pct >= 100 ? GREEN : RED });
   }
 
   const buffer = await pptx.write({ outputType: "nodebuffer" });

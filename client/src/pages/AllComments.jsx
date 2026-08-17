@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { monthName } from "../api.js";
 import Avatar from "../components/Avatar.jsx";
 import { api } from "../api.js";
 
@@ -35,7 +36,7 @@ export default function AllComments() {
               </div>
               <div className="text-sm mb-1">{c.comment_text}</div>
               <div className="text-xs" style={{ color: "#6B7280" }}>
-                {c.mp_name} ({c.rm_name || "—"}) · {c.period_month}/{c.period_year} · раздел: {c.section}
+                {c.mp_name} ({c.rm_name || "—"}) · {monthName(c.period_month)} {c.period_year} · раздел: {c.section}
               </div>
             </div>
           ))}

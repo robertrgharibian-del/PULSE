@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import Avatar from "../components/Avatar.jsx";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { api } from "../api.js";
+import { api, monthName } from "../api.js";
 
 function achColor(pct) {
   if (pct === null || pct === undefined) return "#6B7280";
@@ -134,7 +134,7 @@ export default function MpProfile({ mpId, mpName, onBack }) {
               {profile.comments.map((c) => (
                 <div key={c.id} className="text-sm rounded px-3 py-2" style={{ background: "#EEF1F8" }}>
                   <span style={{ color: "#ED3237" }} className="font-semibold">{c.author_name}</span>
-                  <span style={{ color: "#6B7280" }}> · {c.period_month}/{c.period_year}</span>
+                  <span style={{ color: "#6B7280" }}> · {monthName(c.period_month)} {c.period_year}</span>
                   <div>{c.comment_text}</div>
                 </div>
               ))}
@@ -198,7 +198,7 @@ export default function MpProfile({ mpId, mpName, onBack }) {
               <div className="space-y-2">
                 {profile.plans.map((pl) => (
                   <div key={pl.id} className="text-xs rounded px-3 py-2" style={{ background: "#EEF1F8", color: "#6B7280" }}>
-                    {pl.period_month}/{pl.period_year} · {(pl.kpis || []).length} KPI {pl.rm_comment ? `· «${pl.rm_comment.slice(0, 60)}${pl.rm_comment.length > 60 ? "…" : ""}»` : ""}
+                    {monthName(pl.period_month)} {pl.period_year} · {(pl.kpis || []).length} KPI {pl.rm_comment ? `· «${pl.rm_comment.slice(0, 60)}${pl.rm_comment.length > 60 ? "…" : ""}»` : ""}
                   </div>
                 ))}
               </div>

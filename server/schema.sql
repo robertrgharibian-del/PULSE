@@ -425,6 +425,24 @@ create table if not exists navi_visits (
 );
 create index if not exists idx_navi_visits_doctor on navi_visits(doctor_id, created_at desc);
 
+-- migration 014 (kept in sync here for fresh installs — see migration_014.sql for existing DBs)
+create table if not exists report_opportunities (
+  id           bigserial primary key,
+  report_id    bigint not null references reports(id) on delete cascade,
+  name         text not null,
+  created_by   bigint not null references users(id),
+  created_at   timestamptz not null default now()
+);
+create index if not exists idx_opportunities_report on report_opportunities(report_id);
+create table if not exists report_opportunity_values (
+  id              bigserial primary key,
+  opportunity_id  bigint not null references report_opportunities(id) on delete cascade,
+  product_id      bigint not null references products(id),
+  qty_packages    numeric(10,2) not null default 0,
+  unique (opportunity_id, product_id)
+);
+create index if not exists idx_opportunity_values_opp on report_opportunity_values(opportunity_id);
+
 -- ============================================================
 -- SEED: product catalog (FY'27, MSN Rhythm + Prime)
 -- ============================================================
