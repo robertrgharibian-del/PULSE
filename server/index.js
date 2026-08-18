@@ -3290,4 +3290,7 @@ app.use((err, req, res, next) => {
 process.on("unhandledRejection", (err) => console.error("Unhandled rejection:", err));
 
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => console.log(`FSS Review server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`FSS Review server running on port ${PORT}`);
+  console.log(`AI (NAVI/Аналитика): ${aiEnabled ? "включен, модель " + AI_MODEL : "ВЫКЛЮЧЕН — переменная ANTHROPIC_API_KEY не обнаружена"}`);
+});
