@@ -39,6 +39,18 @@ export default function Dashboard({ role }) {
             <div className="text-xs uppercase" style={{ color: "#6B7280" }}>{role === "master" ? t("dashboard.regions") : t("common.territory")}</div>
             <div className="font-mono text-lg">{data.hierarchy.length}</div>
           </div>
+          <div>
+            <div className="text-xs uppercase" style={{ color: "#6B7280" }}>{t("dashboard.conv_sum")}</div>
+            <div className="font-mono text-lg" style={{ color: "#16A34A" }}>+${data.company.conv_usd.toLocaleString()}</div>
+          </div>
+          <div>
+            <div className="text-xs uppercase" style={{ color: "#6B7280" }}>{t("dashboard.pot_sum")}</div>
+            <div className="font-mono text-lg" style={{ color: "#7C3AED" }}>+${data.company.pot_usd.toLocaleString()}</div>
+          </div>
+          <div>
+            <div className="text-xs uppercase" style={{ color: "#6B7280" }}>{t("dashboard.forecast_sum")}</div>
+            <div className="font-mono text-lg" style={{ color: "#ED3237" }}>${data.company.forecast_usd.toLocaleString()}</div>
+          </div>
         </div>
       </div>
 
@@ -51,8 +63,10 @@ export default function Dashboard({ role }) {
                 <div className="font-semibold">{rm.name}</div>
                 <div className="text-xs" style={{ color: "#6B7280" }}>{rm.mps.length} {t("dashboard.mp_short")}</div>
               </div>
-              <div className="flex items-center gap-4">
+              <div className="flex flex-wrap items-center gap-4">
                 <div className="font-mono text-sm" style={{ color: "#6B7280" }}>${rm.actual_usd.toLocaleString()} / ${rm.target_usd.toLocaleString()}</div>
+                <div className="font-mono text-xs" style={{ color: "#16A34A" }} title={t("dashboard.conv_sum")}>+${rm.conv_usd.toLocaleString()}</div>
+                <div className="font-mono text-xs" style={{ color: "#7C3AED" }} title={t("dashboard.pot_sum")}>+${rm.pot_usd.toLocaleString()}</div>
                 <div className="font-mono font-bold" style={{ color: achColor(rm.achievement) }}>{rm.achievement !== null ? `${(rm.achievement * 100).toFixed(1)}%` : "—"}</div>
                 <span style={{ color: "#6B7280" }}>{expanded[rm.id] ? "▲" : "▼"}</span>
               </div>
@@ -65,8 +79,10 @@ export default function Dashboard({ role }) {
                       <div className="text-sm">{mp.name}</div>
                       <div className="text-xs" style={{ color: "#6B7280" }}>{mp.territory || "—"} {mp.latest_period ? `· ${mp.latest_period}` : `· ${t("dashboard.no_approved")}`}</div>
                     </div>
-                    <div className="flex items-center gap-4 text-sm">
+                    <div className="flex flex-wrap items-center gap-3 text-sm">
                       <span className="font-mono" style={{ color: "#6B7280" }}>${mp.actual_usd.toLocaleString()} / ${mp.target_usd.toLocaleString()}</span>
+                      <span className="font-mono text-xs" style={{ color: "#16A34A" }}>+${mp.conv_usd.toLocaleString()}</span>
+                      <span className="font-mono text-xs" style={{ color: "#7C3AED" }}>+${mp.pot_usd.toLocaleString()}</span>
                       <span className="font-mono font-semibold" style={{ color: achColor(mp.achievement) }}>{mp.achievement !== null ? `${(mp.achievement * 100).toFixed(1)}%` : "—"}</span>
                       <span className="font-mono" style={{ color: "#ED3237" }}>{mp.bonus_uzs.toLocaleString()} UZS</span>
                     </div>

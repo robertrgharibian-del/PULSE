@@ -2244,16 +2244,28 @@ app.get("/api/doc-tracking/doctors/:id", auth, async (req, res) => {
   const logWithUsd = logRes.rows.map((r) => ({ ...r, usd: Number(r.qty_packages) * Number(r.nrv_usd) }));
 
   const monthly = {};
+  const pharmacyMonthly = {}; // { pharmacyName: { "2026-6": { qty, usd } } }
   for (const r of logWithUsd) {
     const d = new Date(r.log_date);
     const key = `${d.getFullYear()}-${d.getMonth() + 1}`;
     monthly[key] ||= { year: d.getFullYear(), month: d.getMonth() + 1, qty: 0, usd: 0 };
     monthly[key].qty += Number(r.qty_packages);
     monthly[key].usd += r.usd;
+
+    const pharmName = r.pharmacy_name || "Без аптеки";
+    pharmacyMonthly[pharmName] ||= {};
+    pharmacyMonthly[pharmName][key] ||= { year: d.getFullYear(), month: d.getMonth() + 1, qty: 0, usd: 0 };
+    pharmacyMonthly[pharmName][key].qty += Number(r.qty_packages);
+    pharmacyMonthly[pharmName][key].usd += r.usd;
   }
   const monthlySummary = Object.values(monthly).sort((a, b) => (a.year - b.year) || (a.month - b.month));
+  const pharmacyMonthlySummary = Object.entries(pharmacyMonthly).map(([pharmacy_name, byMonth]) => ({
+    pharmacy_name,
+    months: Object.values(byMonth).sort((a, b) => (a.year - b.year) || (a.month - b.month)),
+    total_usd: Object.values(byMonth).reduce((s, m) => s + m.usd, 0),
+  }));
 
-  res.json({ doctor: docRes.rows[0], pharmacies: pharmRes.rows, log: logWithUsd, monthly: monthlySummary, total_usd: logWithUsd.reduce((s, r) => s + r.usd, 0) });
+  res.json({ doctor: docRes.rows[0], pharmacies: pharmRes.rows, log: logWithUsd, monthly: monthlySummary, pharmacyMonthly: pharmacyMonthlySummary, total_usd: logWithUsd.reduce((s, r) => s + r.usd, 0) });
 });
 
 app.post("/api/doc-tracking/doctors/:id/log", auth, requireRole("mp"), async (req, res) => {
@@ -2413,13 +2425,14 @@ app.get("/api/dashboard", auth, requireRole("master", "rm", "bm"), async (req, r
   }
 
   const hierarchy = [];
-  let companyTarget = 0, companyActual = 0, companyBonusUzs = 0;
+  let companyTarget = 0, companyActual = 0, companyBonusUzs = 0, companyConvUsd = 0, companyPotUsd = 0, companyForecastUsd = 0;
+  const WEEKS_PER_MONTH_DASH = 4.33;
 
   for (const rm of rmsRes.rows) {
     const mpsRes = req.user.role === "bm"
       ? await pool.query("select id, full_name, territory from users where rm_id=$1 and role='mp' and is_active=true and group_id=$2 order by full_name", [rm.id, req.user.group_id])
       : await pool.query("select id, full_name, territory from users where rm_id=$1 and role='mp' and is_active=true order by full_name", [rm.id]);
-    let rmTarget = 0, rmActual = 0;
+    let rmTarget = 0, rmActual = 0, rmConvUsd = 0, rmPotUsd = 0, rmForecastUsd = 0;
     const mpNodes = [];
     for (const mp of mpsRes.rows) {
       const latestRes = await pool.query(
@@ -2427,40 +2440,65 @@ app.get("/api/dashboard", auth, requireRole("master", "rm", "bm"), async (req, r
         [mp.id]
       );
       const latest = latestRes.rows[0];
-      let target_usd = 0, actual_usd = 0, achievement = null, bonus_uzs = 0;
+      let target_usd = 0, actual_usd = 0, achievement = null, bonus_uzs = 0, conv_usd = 0, pot_usd = 0, forecast_usd = 0;
       if (latest) {
         const fssRes = await pool.query(
-          `select f.target_qty, f.actual_qty, p.nrv_usd from report_fss f join products p on p.id=f.product_id where f.report_id=$1`, [latest.id]
+          `select f.product_id, f.target_qty, f.actual_qty, p.nrv_usd from report_fss f join products p on p.id=f.product_id where f.report_id=$1`, [latest.id]
         );
+        const nrvByProduct = {};
         for (const row of fssRes.rows) {
           target_usd += Number(row.target_qty) * Number(row.nrv_usd);
           actual_usd += Number(row.actual_qty) * Number(row.nrv_usd);
+          nrvByProduct[row.product_id] = Number(row.nrv_usd);
         }
         achievement = target_usd ? actual_usd / target_usd : null;
         const quarter = quarterOf(latest.period_month);
         const qb = await computeMpQuarterBonus(mp.id, latest.period_year, quarter);
         bonus_uzs = qb.bonus_uzs;
+
+        // Conversion / Potential additional business, from this MP's latest report
+        const convRes = await pool.query("select product_id, current_rx_per_week, target_rx_per_week from report_conversion where report_id=$1", [latest.id]);
+        for (const c of convRes.rows) {
+          const delta = Math.max(0, Number(c.target_rx_per_week) - Number(c.current_rx_per_week));
+          conv_usd += delta * WEEKS_PER_MONTH_DASH * (nrvByProduct[c.product_id] || 0);
+        }
+        const potRes = await pool.query("select product_id, current_potential_per_week, target_rx_per_week from report_potential where report_id=$1", [latest.id]);
+        for (const p of potRes.rows) {
+          const delta = Math.max(0, Number(p.target_rx_per_week) - Number(p.current_potential_per_week));
+          pot_usd += delta * WEEKS_PER_MONTH_DASH * (nrvByProduct[p.product_id] || 0);
+        }
+        // Sales expectation forecast (base + conversion + potential + opportunities), in $
+        const oppRes = await pool.query("select ov.product_id, ov.qty_packages from report_opportunity_values ov join report_opportunities o on o.id=ov.opportunity_id where o.report_id=$1", [latest.id]);
+        let opp_usd = 0;
+        for (const o of oppRes.rows) opp_usd += Number(o.qty_packages) * (nrvByProduct[o.product_id] || 0);
+        forecast_usd = actual_usd + conv_usd + pot_usd + opp_usd;
       }
-      rmTarget += target_usd; rmActual += actual_usd;
+      rmTarget += target_usd; rmActual += actual_usd; rmConvUsd += conv_usd; rmPotUsd += pot_usd; rmForecastUsd += forecast_usd;
       mpNodes.push({
         id: mp.id, name: mp.full_name, territory: mp.territory,
         latest_period: latest ? `${latest.period_month}/${latest.period_year}` : null,
         target_usd: Math.round(target_usd), actual_usd: Math.round(actual_usd), achievement, bonus_uzs: Math.round(bonus_uzs),
+        conv_usd: Math.round(conv_usd), pot_usd: Math.round(pot_usd), forecast_usd: Math.round(forecast_usd),
       });
     }
-    companyTarget += rmTarget; companyActual += rmActual;
+    companyTarget += rmTarget; companyActual += rmActual; companyConvUsd += rmConvUsd; companyPotUsd += rmPotUsd; companyForecastUsd += rmForecastUsd;
     companyBonusUzs += mpNodes.reduce((s, m) => s + m.bonus_uzs, 0);
     hierarchy.push({
       id: rm.id, name: rm.full_name, territory: rm.territory,
       target_usd: Math.round(rmTarget), actual_usd: Math.round(rmActual),
       achievement: rmTarget ? rmActual / rmTarget : null,
+      conv_usd: Math.round(rmConvUsd), pot_usd: Math.round(rmPotUsd), forecast_usd: Math.round(rmForecastUsd),
       mps: mpNodes,
     });
   }
 
   res.json({
     hierarchy,
-    company: { target_usd: Math.round(companyTarget), actual_usd: Math.round(companyActual), achievement: companyTarget ? companyActual / companyTarget : null, bonus_uzs: Math.round(companyBonusUzs) },
+    company: {
+      target_usd: Math.round(companyTarget), actual_usd: Math.round(companyActual),
+      achievement: companyTarget ? companyActual / companyTarget : null, bonus_uzs: Math.round(companyBonusUzs),
+      conv_usd: Math.round(companyConvUsd), pot_usd: Math.round(companyPotUsd), forecast_usd: Math.round(companyForecastUsd),
+    },
   });
 });
 

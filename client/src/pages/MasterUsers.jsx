@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from "react";
 import Avatar from "../components/Avatar.jsx";
 import { api } from "../api.js";
+import { useLanguage } from "../i18n/LanguageContext.jsx";
 
-const ROLE_LABEL = { master: "Мастер", rm: "РМ", mp: "МП", bm: "БМ" };
+const ROLE_LABEL_KEY = { master: "role.master_short", rm: "role.rm_short", mp: "role.mp_short", bm: "role.bm_short" };
 
 function GroupManager({ groups, onCreated }) {
+  const { t } = useLanguage();
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -18,16 +20,16 @@ function GroupManager({ groups, onCreated }) {
 
   return (
     <div className="rounded-2xl p-4 sm:p-5 mb-6" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
-      <div className="font-display text-lg mb-3">Группы (портфолио)</div>
+      <div className="font-display text-lg mb-3">{t("users.groups_title")}</div>
       <div className="flex flex-wrap gap-2 mb-3">
         {groups.map((g) => (
           <span key={g.id} className="px-3 py-1.5 rounded-full text-sm" style={{ background: "#E4E7F0" }}>{g.name}</span>
         ))}
       </div>
       <div className="flex gap-2">
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Название новой группы"
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("users.new_group_name")}
           className="bg-transparent border rounded px-3 py-2 text-sm flex-1" style={{ borderColor: "#D3D8E4" }} />
-        <button onClick={add} disabled={busy} className="px-4 py-2 rounded text-sm font-semibold" style={{ background: "#16A34A", color: "#FFFFFF" }}>+ Добавить</button>
+        <button onClick={add} disabled={busy} className="px-4 py-2 rounded text-sm font-semibold" style={{ background: "#16A34A", color: "#FFFFFF" }}>+ {t("common.add")}</button>
       </div>
       {error && <div className="text-sm mt-2" style={{ color: "#DC2626" }}>{error}</div>}
     </div>
@@ -35,6 +37,7 @@ function GroupManager({ groups, onCreated }) {
 }
 
 function CreateUserForm({ rms, territories, groups, onCreated }) {
+  const { t } = useLanguage();
   const [role, setRole] = useState("mp");
   const [form, setForm] = useState({ email: "", password: "", full_name: "", territory: "", rm_id: "", group_id: "" });
   const [error, setError] = useState("");
@@ -57,9 +60,9 @@ function CreateUserForm({ rms, territories, groups, onCreated }) {
 
   return (
     <form onSubmit={submit} className="rounded-2xl p-4 sm:p-5 mb-8" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
-      <div className="font-display text-lg mb-4">Создать аккаунт</div>
+      <div className="font-display text-lg mb-4">{t("users.create_account")}</div>
       <div className="flex flex-wrap gap-2 mb-4">
-        {[["mp", "Медпред (МП)"], ["rm", "Региональный менеджер (РМ)"], ["bm", "Бренд-менеджер (БМ)"]].map(([v, label]) => (
+        {[["mp", t("users.role_mp")], ["rm", t("users.role_rm")], ["bm", t("users.role_bm")]].map(([v, label]) => (
           <button type="button" key={v} onClick={() => setRole(v)}
             className="px-3 py-1.5 rounded text-sm"
             style={{ background: role === v ? "#ED3237" : "#E4E7F0", color: role === v ? "#FFFFFF" : "#374151" }}>
@@ -68,43 +71,44 @@ function CreateUserForm({ rms, territories, groups, onCreated }) {
         ))}
       </div>
       <div className="grid sm:grid-cols-2 gap-3 text-sm">
-        <input required placeholder="Имя Фамилия" value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })}
+        <input required placeholder={t("users.full_name_placeholder")} value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })}
           className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }} />
         <input required type="email" placeholder="email@company.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
           className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }} />
-        <input required type="password" placeholder="Пароль" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}
+        <input required type="password" placeholder={t("common.password")} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}
           className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }} />
         {role === "mp" && (
           <select required value={form.territory} onChange={(e) => setForm({ ...form, territory: e.target.value })}
             className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }}>
-            <option value="" style={{ color: "#000" }}>— выберите территорию —</option>
-            {territories.map((t) => <option key={t.key} value={t.label} style={{ color: "#000" }}>{t.label}</option>)}
+            <option value="" style={{ color: "#000" }}>{t("users.select_territory")}</option>
+            {territories.map((t2) => <option key={t2.key} value={t2.label} style={{ color: "#000" }}>{t2.label}</option>)}
           </select>
         )}
         {(role === "mp" || role === "bm") && (
           <select required value={form.group_id} onChange={(e) => setForm({ ...form, group_id: e.target.value })}
             className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }}>
-            <option value="" style={{ color: "#000" }}>— выберите группу —</option>
+            <option value="" style={{ color: "#000" }}>{t("users.select_group")}</option>
             {groups.map((g) => <option key={g.id} value={g.id} style={{ color: "#000" }}>{g.name}</option>)}
           </select>
         )}
         {role === "mp" && (
           <select required value={form.rm_id} onChange={(e) => setForm({ ...form, rm_id: e.target.value })}
             className="bg-transparent border rounded px-3 py-2 sm:col-span-2" style={{ borderColor: "#D3D8E4" }}>
-            <option value="" style={{ color: "#000" }}>— выберите РМ, к которому прикрепить МП —</option>
+            <option value="" style={{ color: "#000" }}>{t("users.select_rm")}</option>
             {rms.map((rm) => <option key={rm.id} value={rm.id} style={{ color: "#000" }}>{rm.full_name} ({rm.territory || "—"})</option>)}
           </select>
         )}
       </div>
       {error && <div className="text-sm mt-3" style={{ color: "#DC2626" }}>{error}</div>}
       <button disabled={busy} type="submit" className="mt-4 px-5 py-2.5 rounded font-semibold" style={{ background: "#16A34A", color: "#FFFFFF" }}>
-        {busy ? "Создание…" : "Создать аккаунт"}
+        {busy ? t("users.creating") : t("users.create_account")}
       </button>
     </form>
   );
 }
 
 function ResetRequests({ onResolved }) {
+  const { t } = useLanguage();
   const [requests, setRequests] = useState([]);
   const [passwords, setPasswords] = useState({});
   const [busyId, setBusyId] = useState(null);
@@ -114,7 +118,7 @@ function ResetRequests({ onResolved }) {
 
   async function resolve(userId, reqId) {
     const pw = passwords[reqId];
-    if (!pw || pw.length < 6) { alert("Введите новый пароль (минимум 6 символов)"); return; }
+    if (!pw || pw.length < 6) { alert(t("users.enter_new_password_alert")); return; }
     setBusyId(reqId);
     try { await api.resolveReset(userId, pw); await load(); onResolved?.(); }
     finally { setBusyId(null); }
@@ -123,17 +127,17 @@ function ResetRequests({ onResolved }) {
   if (requests.length === 0) return null;
   return (
     <div className="rounded-2xl p-4 sm:p-5 mb-6" style={{ background: "#ED323715", border: "1px solid #ED323744" }}>
-      <div className="font-display text-lg mb-3" style={{ color: "#ED3237" }}>Запросы на восстановление пароля ({requests.length})</div>
+      <div className="font-display text-lg mb-3" style={{ color: "#ED3237" }}>{t("users.reset_requests")} ({requests.length})</div>
       <div className="space-y-2">
         {requests.map((r) => (
           <div key={r.id} className="flex flex-wrap items-center gap-2 rounded-lg p-3" style={{ background: "#F7F8FC" }}>
             <div className="text-sm flex-1 min-w-[160px]">
-              <b>{r.full_name}</b> <span style={{ color: "#6B7280" }}>({r.email}) · {ROLE_LABEL[r.role]}</span>
+              <b>{r.full_name}</b> <span style={{ color: "#6B7280" }}>({r.email}) · {t(ROLE_LABEL_KEY[r.role])}</span>
             </div>
-            <input type="password" placeholder="Новый пароль" value={passwords[r.id] || ""} onChange={(e) => setPasswords((p) => ({ ...p, [r.id]: e.target.value }))}
+            <input type="password" placeholder={t("users.new_password")} value={passwords[r.id] || ""} onChange={(e) => setPasswords((p) => ({ ...p, [r.id]: e.target.value }))}
               className="bg-transparent border rounded px-2 py-1.5 text-sm" style={{ borderColor: "#D3D8E4", width: "160px" }} />
             <button onClick={() => resolve(r.user_id, r.id)} disabled={busyId === r.id} className="px-3 py-1.5 rounded text-sm font-semibold" style={{ background: "#16A34A", color: "#FFFFFF" }}>
-              Задать пароль
+              {t("users.set_password")}
             </button>
           </div>
         ))}
@@ -143,6 +147,7 @@ function ResetRequests({ onResolved }) {
 }
 
 function EditUserRow({ u, rms, territories, groups, onSaved }) {
+  const { t } = useLanguage();
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
     full_name: u.full_name, email: u.email, password: "",
@@ -168,8 +173,8 @@ function EditUserRow({ u, rms, territories, groups, onSaved }) {
 
   async function toggleActive() {
     if (u.is_active) {
-      if (!confirm(`Удалить аккаунт «${u.full_name}»? Он потеряет доступ к системе.`)) return;
-      if (!confirm(`Это нужно подтвердить ещё раз. Точно удалить «${u.full_name}»?`)) return;
+      if (!confirm(t("users.confirm_delete_1", { name: u.full_name }))) return;
+      if (!confirm(t("users.confirm_delete_2", { name: u.full_name }))) return;
       setBusy(true);
       try { await api.deleteUser(u.id); onSaved(); } catch (e) { setError(e.message); } finally { setBusy(false); }
     } else {
@@ -192,7 +197,7 @@ function EditUserRow({ u, rms, territories, groups, onSaved }) {
         <td colSpan={7} className="px-4 py-3">
           <div className="grid sm:grid-cols-2 gap-2 text-sm mb-2">
             <label className="flex flex-col gap-1">
-              <span className="text-xs" style={{ color: "#6B7280" }}>Имя</span>
+              <span className="text-xs" style={{ color: "#6B7280" }}>{t("common.name")}</span>
               <input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })}
                 className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#D3D8E4" }} />
             </label>
@@ -202,30 +207,30 @@ function EditUserRow({ u, rms, territories, groups, onSaved }) {
                 className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#D3D8E4" }} />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-xs" style={{ color: "#6B7280" }}>Новый пароль (необязательно)</span>
-              <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Оставьте пустым, чтобы не менять"
+              <span className="text-xs" style={{ color: "#6B7280" }}>{t("users.new_password_optional")}</span>
+              <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder={t("users.leave_blank")}
                 className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#D3D8E4" }} />
             </label>
             {u.role === "mp" && (
               <label className="flex flex-col gap-1">
-                <span className="text-xs" style={{ color: "#6B7280" }}>Территория</span>
+                <span className="text-xs" style={{ color: "#6B7280" }}>{t("common.territory")}</span>
                 <select value={form.territory} onChange={(e) => setForm({ ...form, territory: e.target.value })} className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#D3D8E4" }}>
-                  {territories.map((t) => <option key={t.key} value={t.label} style={{ color: "#000" }}>{t.label}</option>)}
+                  {territories.map((t2) => <option key={t2.key} value={t2.label} style={{ color: "#000" }}>{t2.label}</option>)}
                 </select>
               </label>
             )}
             {(u.role === "mp" || u.role === "bm") && (
               <label className="flex flex-col gap-1">
-                <span className="text-xs" style={{ color: "#6B7280" }}>Группа</span>
+                <span className="text-xs" style={{ color: "#6B7280" }}>{t("common.group")}</span>
                 <select value={form.group_id} onChange={(e) => setForm({ ...form, group_id: e.target.value })} className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#D3D8E4" }}>
-                  <option value="" style={{ color: "#000" }}>Без группы</option>
+                  <option value="" style={{ color: "#000" }}>{t("users.no_group")}</option>
                   {groups.map((g) => <option key={g.id} value={g.id} style={{ color: "#000" }}>{g.name}</option>)}
                 </select>
               </label>
             )}
             {u.role === "mp" && (
               <label className="flex flex-col gap-1 sm:col-span-2">
-                <span className="text-xs" style={{ color: "#6B7280" }}>Региональный менеджер</span>
+                <span className="text-xs" style={{ color: "#6B7280" }}>{t("users.rm_label")}</span>
                 <select value={form.rm_id} onChange={(e) => setForm({ ...form, rm_id: e.target.value })} className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#D3D8E4" }}>
                   {rms.map((rm) => <option key={rm.id} value={rm.id} style={{ color: "#000" }}>{rm.full_name}</option>)}
                 </select>
@@ -234,8 +239,8 @@ function EditUserRow({ u, rms, territories, groups, onSaved }) {
           </div>
           {error && <div className="text-xs mb-2" style={{ color: "#DC2626" }}>{error}</div>}
           <div className="flex gap-2">
-            <button onClick={save} disabled={busy} className="px-3 py-1.5 rounded text-xs font-semibold" style={{ background: "#16A34A", color: "#FFFFFF" }}>Сохранить</button>
-            <button onClick={() => setEditing(false)} className="px-3 py-1.5 rounded text-xs" style={{ background: "#E4E7F0" }}>Отмена</button>
+            <button onClick={save} disabled={busy} className="px-3 py-1.5 rounded text-xs font-semibold" style={{ background: "#16A34A", color: "#FFFFFF" }}>{t("common.save")}</button>
+            <button onClick={() => setEditing(false)} className="px-3 py-1.5 rounded text-xs" style={{ background: "#E4E7F0" }}>{t("common.cancel")}</button>
           </div>
         </td>
       </tr>
@@ -247,10 +252,10 @@ function EditUserRow({ u, rms, territories, groups, onSaved }) {
       <td className="px-4 py-3">
         <div className="flex items-center gap-2">
           <div key={photoKey}><Avatar userId={u.id} name={u.full_name} size={28} /></div>
-          {u.full_name} {!u.is_active && <span style={{ color: "#DC2626" }}>(удалён)</span>}
+          {u.full_name} {!u.is_active && <span style={{ color: "#DC2626" }}>({t("users.deleted_suffix")})</span>}
         </div>
       </td>
-      <td className="px-4 py-3">{ROLE_LABEL[u.role] || u.role}</td>
+      <td className="px-4 py-3">{t(ROLE_LABEL_KEY[u.role]) || u.role}</td>
       <td className="px-4 py-3" style={{ color: "#6B7280" }}>{u.rm_name || "—"}</td>
       <td className="px-4 py-3" style={{ color: "#6B7280" }}>{u.group_name || "—"}</td>
       <td className="px-4 py-3" style={{ color: "#6B7280" }}>{u.territory || "—"}</td>
@@ -258,14 +263,14 @@ function EditUserRow({ u, rms, territories, groups, onSaved }) {
       <td className="px-4 py-3 text-right whitespace-nowrap">
         {error && <div className="text-xs mb-1" style={{ color: "#DC2626" }}>{error}</div>}
         <label className="text-xs mr-3 cursor-pointer" style={{ color: "#3E4095" }}>
-          {photoBusy ? "…" : "Фото"}
+          {photoBusy ? "…" : t("users.photo")}
           <input type="file" accept="image/*" onChange={uploadPhoto} className="hidden" disabled={photoBusy} />
         </label>
         {u.role !== "master" && (
           <>
-            <button onClick={() => setEditing(true)} className="text-xs mr-3" style={{ color: "#ED3237" }}>Изменить</button>
+            <button onClick={() => setEditing(true)} className="text-xs mr-3" style={{ color: "#ED3237" }}>{t("common.change")}</button>
             <button onClick={toggleActive} disabled={busy} className="text-xs" style={{ color: u.is_active ? "#DC2626" : "#16A34A" }}>
-              {u.is_active ? "Удалить" : "Восстановить"}
+              {u.is_active ? t("common.delete") : t("common.restore")}
             </button>
           </>
         )}
@@ -275,6 +280,7 @@ function EditUserRow({ u, rms, territories, groups, onSaved }) {
 }
 
 export default function MasterUsers() {
+  const { t } = useLanguage();
   const [users, setUsers] = useState([]);
   const [rms, setRms] = useState([]);
   const [territories, setTerritories] = useState([]);
@@ -311,8 +317,8 @@ export default function MasterUsers() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-5 py-8">
-      <div className="font-display text-2xl font-semibold mb-1">Пользователи</div>
-      <div className="text-sm mb-6" style={{ color: "#6B7280" }}>Создание аккаунтов РМ, БМ и медпредов</div>
+      <div className="font-display text-2xl font-semibold mb-1">{t("nav.users")}</div>
+      <div className="text-sm mb-6" style={{ color: "#6B7280" }}>{t("users.subtitle")}</div>
 
       <ResetRequests onResolved={loadAll} />
       <GroupManager groups={groups} onCreated={loadAll} />
@@ -322,11 +328,11 @@ export default function MasterUsers() {
         <table className="w-full text-sm">
           <thead>
             <tr style={{ background: "#F7F8FC", color: "#6B7280" }} className="uppercase text-xs">
-              <th className="text-left px-4 py-3">Имя</th>
-              <SortableHeader label="Роль" sortField="role" />
-              <SortableHeader label="РМ" sortField="rm_name" />
-              <SortableHeader label="Группа" sortField="group_name" />
-              <SortableHeader label="Территория" sortField="territory" />
+              <th className="text-left px-4 py-3">{t("common.name")}</th>
+              <SortableHeader label={t("users.role")} sortField="role" />
+              <SortableHeader label={t("users.rm_label")} sortField="rm_name" />
+              <SortableHeader label={t("common.group")} sortField="group_name" />
+              <SortableHeader label={t("common.territory")} sortField="territory" />
               <th className="text-left px-4 py-3">Email</th>
               <th className="px-4 py-3"></th>
             </tr>
