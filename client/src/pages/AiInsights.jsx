@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import { api } from "../api.js";
+import { api, authedDownload } from "../api.js";
 
 const NAVY = "#3E4095", RED = "#ED3237", MUTED = "#6B7280", PANEL = "#F7F8FC", LINE = "#E4E7F0", GREEN = "#16A34A";
 
@@ -72,16 +72,27 @@ export default function AiInsights() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const [scopes, setScopes] = useState({ mps: [], rms: [] });
+  const [scopeChoice, setScopeChoice] = useState(""); // "" = default; "mp:123" or "rm:45"
+
+  function currentScopeParam() {
+    if (!scopeChoice) return undefined;
+    const [kind, id] = scopeChoice.split(":");
+    return kind === "mp" ? { mp_id: id } : { rm_id: id };
+  }
+
   async function load(refresh) {
     setBusy(true); setError("");
-    try { setData(await api.aiInsights(refresh)); }
+    try { setData(await api.aiInsights(refresh, currentScopeParam())); }
     catch (e) { setError(e.message); }
     finally { setBusy(false); }
   }
 
   useEffect(() => {
-    api.aiInsightsStatus().then((s) => { setStatus(s); if (s.enabled) load(false); });
+    api.aiInsightsStatus().then((s) => { setStatus(s); if (s.enabled) { load(false); api.aiInsightsScopes().then(setScopes); } });
   }, []);
+
+  useEffect(() => { if (status?.enabled) load(false); }, [scopeChoice]);
 
   if (status && !status.enabled) {
     return (
@@ -95,10 +106,11 @@ export default function AiInsights() {
   }
 
   const chart = data?.chart_data;
+  const hasScopePicker = scopes.mps.length > 0 || scopes.rms.length > 0;
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-5 py-8">
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div>
           <div className="font-display text-2xl font-semibold">Аналитика</div>
           <div className="text-sm" style={{ color: MUTED }}>
@@ -109,6 +121,31 @@ export default function AiInsights() {
           {busy ? "Анализирую…" : "Обновить анализ"}
         </button>
       </div>
+
+      {hasScopePicker && (
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <select value={scopeChoice} onChange={(e) => setScopeChoice(e.target.value)} className="bg-transparent border rounded px-3 py-2 text-sm" style={{ borderColor: "#D3D8E4" }}>
+            <option value="" style={{ color: "#000" }}>{data?.scope_label || "Вся видимая область"}</option>
+            {scopes.rms.length > 0 && (
+              <optgroup label="По территориям (РМ)">
+                {scopes.rms.map((r) => <option key={`rm:${r.id}`} value={`rm:${r.id}`} style={{ color: "#000" }}>{r.full_name}{r.territory ? ` — ${r.territory}` : ""}</option>)}
+              </optgroup>
+            )}
+            {scopes.mps.length > 0 && (
+              <optgroup label="По медпредставителям">
+                {scopes.mps.map((m) => <option key={`mp:${m.id}`} value={`mp:${m.id}`} style={{ color: "#000" }}>{m.full_name}{m.territory ? ` — ${m.territory}` : ""}</option>)}
+              </optgroup>
+            )}
+          </select>
+        </div>
+      )}
+
+      {data && (
+        <div className="flex flex-wrap gap-2 mb-4">
+          <button onClick={() => authedDownload(api.aiInsightsExportUrl("xlsx", currentScopeParam()))} className="px-4 py-2 rounded text-sm" style={{ background: "#E4E7F0" }}>Скачать Excel</button>
+          <button onClick={() => authedDownload(api.aiInsightsExportUrl("pptx", currentScopeParam()))} className="px-4 py-2 rounded text-sm" style={{ background: "#E4E7F0" }}>Скачать PPTX</button>
+        </div>
+      )}
 
       {error && <div className="text-sm mb-4 px-3 py-2 rounded" style={{ background: "#DC262622", color: "#DC2626" }}>{error}</div>}
       {!data && !error && <div style={{ color: MUTED }}>Загрузка…</div>}

@@ -2609,55 +2609,73 @@ app.get("/api/ai-insights/status", auth, async (req, res) => {
 
 const AI_CACHE_HOURS = 24;
 
-app.get("/api/ai-insights", auth, async (req, res) => {
-  if (!aiEnabled) return res.status(503).json({ error: "ИИ-анализ не настроен на сервере (нет ANTHROPIC_API_KEY)" });
-  const refresh = req.query.refresh === "true";
-  let scope, scopeId, mpIds, rmIds, label;
+// Resolves which MPs/RMs a request should analyze, honoring the caller's
+// role-based visibility plus an optional drill-down (mp_id or rm_id) into
+// a specific person/team within that visibility. Used by both the main
+// analytics endpoint and the Excel/PPTX export endpoints.
+async function resolveAiScope(user, { mp_id, rm_id }) {
+  let baseMpIds, baseRmIds, groupId = null;
 
-  if (req.user.role === "mp") {
-    scope = "mp"; scopeId = req.user.id; mpIds = [req.user.id]; rmIds = [];
-    const u = await pool.query("select full_name from users where id=$1", [req.user.id]);
-    label = `МП ${u.rows[0]?.full_name || ""}`;
-  } else if (req.user.role === "rm") {
-    scope = "rm"; scopeId = req.user.id;
-    const team = await pool.query("select id from users where rm_id=$1 and role='mp'", [req.user.id]);
-    mpIds = team.rows.map((r) => r.id); rmIds = [];
-    label = "Команда РМ";
-  } else if (req.user.role === "master") {
-    scope = "master"; scopeId = null;
-    const all = await pool.query("select id from users where role='mp'");
-    mpIds = all.rows.map((r) => r.id);
-    const allRms = await pool.query("select id from users where role='rm'");
-    rmIds = allRms.rows.map((r) => r.id);
-    label = "Вся компания";
+  if (user.role === "mp") {
+    baseMpIds = [user.id]; baseRmIds = [];
+  } else if (user.role === "rm") {
+    const team = await pool.query("select id from users where rm_id=$1 and role='mp' and is_active=true", [user.id]);
+    baseMpIds = team.rows.map((r) => r.id); baseRmIds = [];
+  } else if (user.role === "bm") {
+    groupId = user.group_id;
+    const team = await pool.query("select id, rm_id from users where role='mp' and is_active=true and group_id=$1", [groupId]);
+    baseMpIds = team.rows.map((r) => r.id);
+    baseRmIds = [...new Set(team.rows.map((r) => r.rm_id).filter(Boolean))];
+  } else if (user.role === "master") {
+    const all = await pool.query("select id from users where role='mp' and is_active=true");
+    baseMpIds = all.rows.map((r) => r.id);
+    const allRms = await pool.query("select id from users where role='rm' and is_active=true");
+    baseRmIds = allRms.rows.map((r) => r.id);
   } else {
-    return res.status(403).json({ error: "Forbidden" });
+    return null;
   }
 
+  // Drill-down into one MP
+  if (mp_id) {
+    if (!baseMpIds.map(String).includes(String(mp_id))) return { forbidden: true };
+    const u = await pool.query("select full_name from users where id=$1", [mp_id]);
+    return { scope: "mp_drilldown", scopeId: Number(mp_id), mpIds: [Number(mp_id)], rmIds: [], label: `МП ${u.rows[0]?.full_name || ""}` };
+  }
+  // Drill-down into one RM's team
+  if (rm_id) {
+    if (!baseRmIds.map(String).includes(String(rm_id))) return { forbidden: true };
+    const teamQuery = groupId
+      ? await pool.query("select id from users where rm_id=$1 and role='mp' and is_active=true and group_id=$2", [rm_id, groupId])
+      : await pool.query("select id from users where rm_id=$1 and role='mp' and is_active=true", [rm_id]);
+    const u = await pool.query("select full_name, territory from users where id=$1", [rm_id]);
+    return { scope: "rm_drilldown", scopeId: Number(rm_id), mpIds: teamQuery.rows.map((r) => r.id), rmIds: [], label: `Территория РМ ${u.rows[0]?.full_name || ""}` };
+  }
+
+  // Default (no drill-down): the caller's own base scope
+  const scope = user.role === "mp" ? "mp" : user.role === "rm" ? "rm" : user.role === "bm" ? "bm" : "master";
+  const scopeId = user.role === "master" ? null : user.role === "bm" ? user.group_id : user.id;
+  const label = user.role === "mp" ? "Мой отчёт" : user.role === "rm" ? "Вся моя команда" : user.role === "bm" ? "Вся группа (все территории)" : "Вся компания (Узбекистан)";
+  return { scope, scopeId, mpIds: baseMpIds, rmIds: baseRmIds, label };
+}
+
+async function getOrGenerateAiInsights(resolved, refresh) {
   if (!refresh) {
     const cacheRes = await pool.query(
-      `select * from ai_insights where scope=$1 and scope_id ${scopeId === null ? "is null" : "=$2"} order by created_at desc limit 1`,
-      scopeId === null ? [scope] : [scope, scopeId]
+      `select * from ai_insights where scope=$1 and scope_id ${resolved.scopeId === null ? "is null" : "=$2"} order by created_at desc limit 1`,
+      resolved.scopeId === null ? [resolved.scope] : [resolved.scope, resolved.scopeId]
     );
     const cached = cacheRes.rows[0];
     if (cached && (Date.now() - new Date(cached.created_at).getTime()) < AI_CACHE_HOURS * 3600 * 1000) {
-      return res.json({ ...cached.content, generated_at: cached.created_at, cached: true });
+      return { ...cached.content, generated_at: cached.created_at, cached: true };
     }
   }
 
-  const context = await buildAnalyticsContext(pool, { mpIds, label, scope, rmIds });
+  const context = await buildAnalyticsContext(pool, { mpIds: resolved.mpIds, label: resolved.label, scope: resolved.scope, rmIds: resolved.rmIds });
   if (!context || context.months.length === 0) {
-    return res.json({ summary: "Недостаточно данных для анализа — нет ни одного одобренного отчёта.", monthly_dynamics: "", quarterly_dynamics: "", yearly_dynamics: "", conversion_potential_analysis: "", navi_analysis: "", risks: [], short_term_recommendations: [], long_term_recommendations: [], team_analysis: [], employee_recommendations: [], business_recommendations: null, chart_data: null, generated_at: new Date(), cached: false });
+    return { summary: "Недостаточно данных для анализа — нет ни одного одобренного отчёта.", monthly_dynamics: "", quarterly_dynamics: "", yearly_dynamics: "", conversion_potential_analysis: "", navi_analysis: "", risks: [], short_term_recommendations: [], long_term_recommendations: [], team_analysis: [], employee_recommendations: [], business_recommendations: null, chart_data: null, generated_at: new Date(), cached: false };
   }
 
-  let content;
-  try {
-    content = await callClaude(context);
-  } catch (e) {
-    console.error("AI insights error:", e.message);
-    return res.status(502).json({ error: "Не удалось получить анализ от ИИ. Попробуйте позже." });
-  }
-
+  const content = await callClaude(context);
   const hasTeam = (context.per_mp && context.per_mp.length > 0) || (context.per_rm && context.per_rm.length > 0);
   let teamContent = { team_analysis: [], employee_recommendations: [], business_recommendations: null };
   if (hasTeam) {
@@ -2665,20 +2683,318 @@ app.get("/api/ai-insights", auth, async (req, res) => {
       teamContent = await callClaudeTeamAnalysis(context);
     } catch (e) {
       console.error("AI insights team analysis error:", e.message);
-      // Don't fail the whole request — the core analysis above is still valid and useful on its own
       teamContent._team_error = "Не удалось получить анализ команды. Попробуйте «Обновить анализ» ещё раз.";
     }
   }
 
-  // Real, non-hallucinated numbers for charts — computed server-side, not from the AI's text
   const chart_data = { months: context.months, quarterly: context.quarterly, yearly: context.yearly, per_mp: context.per_mp, per_rm: context.per_rm };
   const fullContent = { ...content, ...teamContent, chart_data };
 
   await pool.query(
     "insert into ai_insights (scope, scope_id, content, model) values ($1,$2,$3,$4)",
-    [scope, scopeId, fullContent, AI_MODEL]
+    [resolved.scope, resolved.scopeId, fullContent, AI_MODEL]
   );
-  res.json({ ...fullContent, generated_at: new Date(), cached: false });
+  return { ...fullContent, generated_at: new Date(), cached: false };
+}
+
+app.get("/api/ai-insights", auth, async (req, res) => {
+  if (!aiEnabled) return res.status(503).json({ error: "ИИ-анализ не настроен на сервере (нет ANTHROPIC_API_KEY)" });
+  const resolved = await resolveAiScope(req.user, { mp_id: req.query.mp_id, rm_id: req.query.rm_id });
+  if (!resolved) return res.status(403).json({ error: "Forbidden" });
+  if (resolved.forbidden) return res.status(403).json({ error: "Нет доступа к этому сотруднику/территории" });
+
+  try {
+    const result = await getOrGenerateAiInsights(resolved, req.query.refresh === "true");
+    res.json({ ...result, scope_label: resolved.label });
+  } catch (e) {
+    console.error("AI insights error:", e.message);
+    res.status(502).json({ error: "Не удалось получить анализ от ИИ. Попробуйте позже." });
+  }
+});
+
+// List of people/territories this user can drill into (for the Analytics page's scope picker)
+app.get("/api/ai-insights/scopes", auth, async (req, res) => {
+  const role = req.user.role;
+  if (role === "mp") return res.json({ mps: [], rms: [] });
+  let mps = [], rms = [];
+  if (role === "rm") {
+    const t = await pool.query("select id, full_name, territory from users where rm_id=$1 and role='mp' and is_active=true order by full_name", [req.user.id]);
+    mps = t.rows;
+  } else if (role === "bm") {
+    const t = await pool.query("select id, full_name, territory from users where role='mp' and is_active=true and group_id=$1 order by full_name", [req.user.group_id]);
+    mps = t.rows;
+    const r = await pool.query(
+      `select distinct rm.id, rm.full_name, rm.territory from users rm join users mp on mp.rm_id=rm.id where mp.role='mp' and mp.is_active=true and mp.group_id=$1 order by rm.full_name`,
+      [req.user.group_id]
+    );
+    rms = r.rows;
+  } else if (role === "master") {
+    const t = await pool.query("select id, full_name, territory from users where role='mp' and is_active=true order by full_name");
+    mps = t.rows;
+    const r = await pool.query("select id, full_name, territory from users where role='rm' and is_active=true order by full_name");
+    rms = r.rows;
+  }
+  res.json({ mps, rms });
+});
+
+/* ---- Analytics export: Excel (styled tables) + PPTX (real charts), same style as report exports ---- */
+async function loadAiInsightsForExport(req, res) {
+  if (!aiEnabled) { res.status(503).json({ error: "ИИ-анализ не настроен на сервере" }); return null; }
+  const resolved = await resolveAiScope(req.user, { mp_id: req.query.mp_id, rm_id: req.query.rm_id });
+  if (!resolved) { res.status(403).json({ error: "Forbidden" }); return null; }
+  if (resolved.forbidden) { res.status(403).json({ error: "Нет доступа к этому сотруднику/территории" }); return null; }
+  const content = await getOrGenerateAiInsights(resolved, false);
+  if (!content.chart_data) { res.status(400).json({ error: "Сначала откройте вкладку «Аналитика» и дождитесь генерации анализа" }); return null; }
+  return { ...content, scope_label: resolved.label };
+}
+
+app.get("/api/ai-insights/export.xlsx", auth, async (req, res) => {
+  const data = await loadAiInsightsForExport(req, res);
+  if (!data) return;
+
+  const NAVY = "FF3E4095", GOLD = "FFED3237", GREEN = "FFC6EFCE", GREENFONT = "FF1B5E20", RED = "FFFDE0DF", REDFONT = "FFB71C1C";
+  const headerFill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
+  const headerFont = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+  const titleFont = { bold: true, size: 16, color: { argb: NAVY } };
+  const thin = { style: "thin", color: { argb: "FFD9DCE1" } };
+  const border = { top: thin, bottom: thin, left: thin, right: thin };
+  function styleHeaderRow(row) {
+    row.eachCell((cell) => { cell.fill = headerFill; cell.font = headerFont; cell.border = border; cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true }; });
+    row.height = 22;
+  }
+  function achFill(pct) {
+    if (pct === null || pct === undefined) return null;
+    if (pct >= 90) return { type: "pattern", pattern: "solid", fgColor: { argb: GREEN } };
+    if (pct < 80) return { type: "pattern", pattern: "solid", fgColor: { argb: RED } };
+    return null;
+  }
+  function achFont(pct) {
+    if (pct === null || pct === undefined) return {};
+    if (pct >= 90) return { color: { argb: GREENFONT }, bold: true };
+    if (pct < 80) return { color: { argb: REDFONT }, bold: true };
+    return {};
+  }
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "PULSE";
+  const logoId = wb.addImage({ filename: path.join(__dirname, "assets", "msn-logo.png"), extension: "png" });
+
+  const ws1 = wb.addWorksheet("Аналитика", { views: [{ showGridLines: false }] });
+  ws1.addImage(logoId, { tl: { col: 0, row: 0 }, ext: { width: 130, height: 68 } });
+  ws1.mergeCells("C1:H1");
+  ws1.getCell("C1").value = `Аналитика — ${data.scope_label}`;
+  ws1.getCell("C1").font = titleFont;
+  ws1.getCell("C2").value = `Сформировано: ${new Date(data.generated_at).toLocaleString("ru-RU")}`;
+  ws1.getCell("C2").font = { italic: true, color: { argb: "FF6B7280" } };
+  let r = 5;
+  const textSection = (title, text) => {
+    if (!text) return;
+    ws1.getCell(`A${r}`).value = title; ws1.getCell(`A${r}`).font = { bold: true, size: 13, color: { argb: NAVY } };
+    r += 1;
+    ws1.mergeCells(`A${r}:H${r}`);
+    ws1.getCell(`A${r}`).value = text; ws1.getCell(`A${r}`).alignment = { wrapText: true, vertical: "top" };
+    ws1.getRow(r).height = Math.max(20, Math.ceil(text.length / 110) * 15);
+    r += 2;
+  };
+  textSection("Главный вывод", data.summary);
+  textSection("Динамика месяц-к-месяцу", data.monthly_dynamics);
+  textSection("Динамика квартал-к-кварталу", data.quarterly_dynamics);
+  textSection("Динамика год-к-году", data.yearly_dynamics);
+  textSection("Конверсия и увеличение потенциала", data.conversion_potential_analysis);
+  textSection("Работа с трудными врачами (NAVI)", data.navi_analysis);
+  if (data.risks?.length) textSection("Риски", data.risks.map((x) => `• ${x}`).join("\n"));
+  if (data.short_term_recommendations?.length) textSection("Рекомендации: краткосрочно", data.short_term_recommendations.map((x) => `• ${x}`).join("\n"));
+  if (data.long_term_recommendations?.length) textSection("Рекомендации: долгосрочно", data.long_term_recommendations.map((x) => `• ${x}`).join("\n"));
+  ws1.columns = Array(8).fill({ width: 16 });
+
+  const ws2 = wb.addWorksheet("Динамика по месяцам", { views: [{ showGridLines: false }] });
+  styleHeaderRow(ws2.addRow(["Период", "План, $", "Факт, $", "% выполнения", "FFE score, %"]));
+  (data.chart_data.months || []).forEach((m) => {
+    const row = ws2.addRow([m.period, m.target_usd, m.actual_usd, m.achievement_pct, m.ffe_score_pct]);
+    row.getCell(4).fill = achFill(m.achievement_pct); row.getCell(4).font = achFont(m.achievement_pct);
+    row.eachCell((c) => (c.border = border));
+  });
+  ws2.columns.forEach((c) => (c.width = 20));
+
+  if (data.chart_data.quarterly?.length) {
+    const ws3 = wb.addWorksheet("Динамика по кварталам", { views: [{ showGridLines: false }] });
+    styleHeaderRow(ws3.addRow(["Квартал", "План, $", "Факт, $", "% выполнения"]));
+    data.chart_data.quarterly.forEach((q) => {
+      const row = ws3.addRow([q.period, q.target_usd, q.actual_usd, q.achievement_pct]);
+      row.getCell(4).fill = achFill(q.achievement_pct); row.getCell(4).font = achFont(q.achievement_pct);
+      row.eachCell((c) => (c.border = border));
+    });
+    ws3.columns.forEach((c) => (c.width = 20));
+  }
+
+  if (data.chart_data.per_mp?.length) {
+    const ws4 = wb.addWorksheet("По медпредставителям", { views: [{ showGridLines: false }] });
+    styleHeaderRow(ws4.addRow(["МП", "Территория", "Последнее выполнение, %", "Среднее выполнение, %", "Отчётов подано"]));
+    data.chart_data.per_mp.forEach((m) => {
+      const row = ws4.addRow([m.name, m.territory, m.latest_achievement_pct, m.avg_achievement_pct, m.months_reported]);
+      row.getCell(3).fill = achFill(m.latest_achievement_pct); row.getCell(3).font = achFont(m.latest_achievement_pct);
+      row.eachCell((c) => (c.border = border));
+    });
+    ws4.columns.forEach((c) => (c.width = 22));
+    if (data.team_analysis?.length || data.employee_recommendations?.length) {
+      ws4.addRow([]);
+      const t2 = ws4.addRow(["Анализ и рекомендации по сотрудникам"]); t2.font = titleFont;
+      styleHeaderRow(ws4.addRow(["Имя", "Роль", "Оценка", "Рекомендация: месяц", "Рекомендация: квартал", "Рекомендация: год"]));
+      const recByName = Object.fromEntries((data.employee_recommendations || []).map((e) => [e.name, e]));
+      (data.team_analysis || []).forEach((p) => {
+        const rec = recByName[p.name] || {};
+        const row = ws4.addRow([p.name, p.role, p.assessment, rec.monthly, rec.quarterly, rec.yearly]);
+        row.eachCell((c) => { c.border = border; c.alignment = { wrapText: true, vertical: "top" }; });
+        row.height = 60;
+      });
+    }
+  }
+
+  if (data.chart_data.per_rm?.length) {
+    const ws5 = wb.addWorksheet("По региональным менеджерам", { views: [{ showGridLines: false }] });
+    styleHeaderRow(ws5.addRow(["РМ", "Территория", "Кол-во МП", "Средний % команды"]));
+    data.chart_data.per_rm.forEach((m) => {
+      const row = ws5.addRow([m.name, m.territory, m.mp_count, m.team_avg_achievement_pct]);
+      row.getCell(4).fill = achFill(m.team_avg_achievement_pct); row.getCell(4).font = achFont(m.team_avg_achievement_pct);
+      row.eachCell((c) => (c.border = border));
+    });
+    ws5.columns.forEach((c) => (c.width = 22));
+  }
+
+  if (data.business_recommendations) {
+    const ws6 = wb.addWorksheet("Рекомендации по бизнесу", { views: [{ showGridLines: false }] });
+    ws6.getCell("A1").value = "Рекомендации по развитию бизнеса"; ws6.getCell("A1").font = titleFont;
+    ["monthly", "quarterly", "yearly"].forEach((k, i) => {
+      const label = k === "monthly" ? "Месяц" : k === "quarterly" ? "Квартал" : "Год";
+      ws6.getCell(`A${3 + i * 3}`).value = label; ws6.getCell(`A${3 + i * 3}`).font = { bold: true, color: { argb: NAVY } };
+      ws6.mergeCells(`A${4 + i * 3}:H${4 + i * 3}`);
+      ws6.getCell(`A${4 + i * 3}`).value = data.business_recommendations[k]; ws6.getCell(`A${4 + i * 3}`).alignment = { wrapText: true };
+      ws6.getRow(4 + i * 3).height = 60;
+    });
+    ws6.columns = Array(8).fill({ width: 16 });
+  }
+
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="analytics.xlsx"`);
+  await wb.xlsx.write(res);
+  res.end();
+});
+
+app.get("/api/ai-insights/export.pptx", auth, async (req, res) => {
+  const data = await loadAiInsightsForExport(req, res);
+  if (!data) return;
+
+  const pptx = new PptxGenJS();
+  pptx.defineLayout({ name: "WIDE", width: 13.33, height: 7.5 });
+  pptx.layout = "WIDE";
+  const BG = "FFFFFF", INK = "1F2937", MUTED = "6B7280", NAVY = "3E4095", GOLD = "ED3237", GREEN = "16A34A", RED = "DC2626", PANEL = "F7F8FC", LINE = "E4E7F0", ACCENT = "ED3237";
+  const MSN_LOGO = path.join(__dirname, "assets", "msn-logo.png");
+
+  function chrome(s, title) {
+    s.background = { color: BG };
+    s.addImage({ path: MSN_LOGO, x: 11.7, y: 0.25, w: 1.2, h: 0.6, sizing: { type: "contain", w: 1.2, h: 0.6 } });
+    s.addText(title, { x: 0.5, y: 0.3, fontSize: 22, bold: true, color: NAVY, fontFace: "Arial" });
+    s.addShape(pptx.ShapeType.line, { x: 0.5, y: 0.9, w: 10.8, h: 0, line: { color: ACCENT, width: 2 } });
+  }
+  function achColor(pct) { if (pct === null || pct === undefined) return MUTED; return pct >= 90 ? GREEN : pct < 80 ? RED : ACCENT; }
+  function textSlide(title, text) {
+    if (!text) return;
+    const s = pptx.addSlide(); chrome(s, title);
+    s.addText(text, { x: 0.5, y: 1.1, w: 12.3, h: 5.8, fontSize: 14, color: INK, valign: "top", fontFace: "Arial" });
+  }
+  function listSlide(title, items, color) {
+    if (!items?.length) return;
+    const s = pptx.addSlide(); chrome(s, title);
+    const bullets = items.map((it) => ({ text: it, options: { bullet: true, color: color || INK, breakLine: true, fontSize: 13 } }));
+    s.addText(bullets, { x: 0.5, y: 1.1, w: 12.3, h: 5.8, valign: "top", fontFace: "Arial" });
+  }
+
+  // ---- Cover ----
+  let s = pptx.addSlide();
+  s.background = { color: BG };
+  s.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 13.33, h: 7.5, fill: { color: PANEL } });
+  s.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.18, h: 7.5, fill: { color: ACCENT } });
+  s.addImage({ path: MSN_LOGO, x: 0.9, y: 0.6, w: 2.4, h: 1.2, sizing: { type: "contain", w: 2.4, h: 1.2 } });
+  s.addText("Аналитика", { x: 0.9, y: 2.6, w: 11.5, h: 1, fontSize: 34, bold: true, color: NAVY, fontFace: "Arial" });
+  s.addText(data.scope_label, { x: 0.9, y: 3.5, w: 11.5, h: 0.6, fontSize: 18, color: ACCENT, bold: true, fontFace: "Arial" });
+  s.addText(`Сформировано: ${new Date(data.generated_at).toLocaleString("ru-RU")}`, { x: 0.9, y: 4.05, w: 11.5, h: 0.5, fontSize: 14, color: MUTED, fontFace: "Arial" });
+
+  textSlide("Главный вывод", data.summary);
+
+  if (data.chart_data.months?.length) {
+    s = pptx.addSlide(); chrome(s, "Динамика месяц-к-месяцу");
+    s.addChart(pptx.ChartType.bar, [
+      { name: "План, $", labels: data.chart_data.months.map((m) => m.period), values: data.chart_data.months.map((m) => m.target_usd) },
+      { name: "Факт, $", labels: data.chart_data.months.map((m) => m.period), values: data.chart_data.months.map((m) => m.actual_usd) },
+    ], { x: 0.5, y: 1.0, w: 12.3, h: 3.2, barGrouping: "clustered", chartColors: ["D3D8E4", ACCENT], showLegend: true, catAxisLabelColor: MUTED, valAxisLabelColor: MUTED });
+    s.addText(data.monthly_dynamics || "", { x: 0.5, y: 4.4, w: 12.3, h: 2.6, fontSize: 11, color: INK, valign: "top", fontFace: "Arial" });
+  }
+
+  if (data.chart_data.quarterly?.length) {
+    s = pptx.addSlide(); chrome(s, "Динамика квартал-к-кварталу");
+    s.addChart(pptx.ChartType.line, [
+      { name: "% выполнения", labels: data.chart_data.quarterly.map((q) => q.period), values: data.chart_data.quarterly.map((q) => q.achievement_pct) },
+    ], { x: 0.5, y: 1.0, w: 12.3, h: 3.2, chartColors: [NAVY], showLegend: false, catAxisLabelColor: MUTED, valAxisLabelColor: MUTED, lineDataSymbol: "circle" });
+    s.addText(data.quarterly_dynamics || "", { x: 0.5, y: 4.4, w: 12.3, h: 2.6, fontSize: 11, color: INK, valign: "top", fontFace: "Arial" });
+  }
+
+  textSlide("Динамика год-к-году", data.yearly_dynamics);
+  textSlide("Конверсия и увеличение потенциала", data.conversion_potential_analysis);
+  textSlide("Работа с трудными врачами (NAVI)", data.navi_analysis);
+  listSlide("Риски", data.risks, RED);
+  listSlide("Рекомендации: краткосрочно (1-4 недели)", data.short_term_recommendations, ACCENT);
+  listSlide("Рекомендации: долгосрочно (квартал+)", data.long_term_recommendations, GREEN);
+
+  if (data.chart_data.per_mp?.length) {
+    s = pptx.addSlide(); chrome(s, "Эффективность команды: медпредставители");
+    s.addChart(pptx.ChartType.bar, [
+      { name: "% выполнения", labels: data.chart_data.per_mp.map((m) => m.name), values: data.chart_data.per_mp.map((m) => m.latest_achievement_pct || 0) },
+    ], { x: 0.5, y: 1.0, w: 12.3, h: 5.6, barDir: "bar", chartColors: data.chart_data.per_mp.map((m) => achColor(m.latest_achievement_pct)), showLegend: false, showValue: true, catAxisLabelColor: MUTED, valAxisLabelColor: MUTED, valAxisMinVal: 0, valAxisMaxVal: 100 });
+  }
+  if (data.chart_data.per_rm?.length) {
+    s = pptx.addSlide(); chrome(s, "Эффективность команды: региональные менеджеры");
+    s.addChart(pptx.ChartType.bar, [
+      { name: "Средний % команды", labels: data.chart_data.per_rm.map((m) => m.name), values: data.chart_data.per_rm.map((m) => m.team_avg_achievement_pct || 0) },
+    ], { x: 0.5, y: 1.0, w: 12.3, h: 5.6, barDir: "bar", chartColors: data.chart_data.per_rm.map((m) => achColor(m.team_avg_achievement_pct)), showLegend: false, showValue: true, catAxisLabelColor: MUTED, valAxisLabelColor: MUTED, valAxisMinVal: 0, valAxisMaxVal: 100 });
+  }
+
+  (data.team_analysis || []).forEach((p) => {
+    const rec = (data.employee_recommendations || []).find((e) => e.name === p.name);
+    s = pptx.addSlide(); chrome(s, `${p.name} (${p.role})`);
+    s.addText("Оценка эффективности", { x: 0.5, y: 1.0, fontSize: 13, bold: true, color: NAVY, fontFace: "Arial" });
+    s.addText(p.assessment || "", { x: 0.5, y: 1.4, w: 12.3, h: 1.6, fontSize: 12, color: INK, valign: "top", fontFace: "Arial" });
+    if (rec) {
+      const recRows = [[
+        { text: "Месяц", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+        { text: "Квартал", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+        { text: "Год", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+      ], [
+        { text: rec.monthly || "—", options: { color: INK, valign: "top" } },
+        { text: rec.quarterly || "—", options: { color: INK, valign: "top" } },
+        { text: rec.yearly || "—", options: { color: INK, valign: "top" } },
+      ]];
+      s.addTable(recRows, { x: 0.5, y: 3.2, w: 12.3, h: 3.5, fontSize: 11, border: { color: LINE, pt: 0.5 }, autoPage: false, valign: "top" });
+    }
+  });
+
+  if (data.business_recommendations) {
+    s = pptx.addSlide(); chrome(s, "Рекомендации по развитию бизнеса");
+    const bizRows = [[
+      { text: "Месяц", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+      { text: "Квартал", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+      { text: "Год", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+    ], [
+      { text: data.business_recommendations.monthly || "—", options: { color: INK, valign: "top" } },
+      { text: data.business_recommendations.quarterly || "—", options: { color: INK, valign: "top" } },
+      { text: data.business_recommendations.yearly || "—", options: { color: INK, valign: "top" } },
+    ]];
+    s.addTable(bizRows, { x: 0.5, y: 1.1, w: 12.3, h: 5.5, fontSize: 12, border: { color: LINE, pt: 0.5 }, autoPage: false, valign: "top" });
+  }
+
+  const buffer = await pptx.write({ outputType: "nodebuffer" });
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+  res.setHeader("Content-Disposition", `attachment; filename="analytics.pptx"`);
+  res.end(buffer);
 });
 
 /* ============================================================

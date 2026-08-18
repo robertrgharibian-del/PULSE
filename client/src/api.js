@@ -147,7 +147,22 @@ export const api = {
   rmBonus: (year, quarter, rmId) => request(`/api/rm-bonus?year=${year}&quarter=${quarter}${rmId ? `&rm_id=${rmId}` : ""}`),
   allComments: () => request("/api/comments/all"),
   aiInsightsStatus: () => request("/api/ai-insights/status"),
-  aiInsights: (refresh) => request(`/api/ai-insights${refresh ? "?refresh=true" : ""}`),
+  aiInsights: (refresh, scope) => {
+    const params = new URLSearchParams();
+    if (refresh) params.set("refresh", "true");
+    if (scope?.mp_id) params.set("mp_id", scope.mp_id);
+    if (scope?.rm_id) params.set("rm_id", scope.rm_id);
+    const qs = params.toString();
+    return request(`/api/ai-insights${qs ? `?${qs}` : ""}`);
+  },
+  aiInsightsScopes: () => request("/api/ai-insights/scopes"),
+  aiInsightsExportUrl: (format, scope) => {
+    const params = new URLSearchParams();
+    if (scope?.mp_id) params.set("mp_id", scope.mp_id);
+    if (scope?.rm_id) params.set("rm_id", scope.rm_id);
+    params.set("token", localStorage.getItem("fss_token"));
+    return `${BASE}/api/ai-insights/export.${format}?${params.toString()}`;
+  },
   dashboard: () => request("/api/dashboard"),
   importHistory: () => request("/api/import/history"),
   undoImport: (id) => request(`/api/import/${id}/undo`, { method: "POST" }),

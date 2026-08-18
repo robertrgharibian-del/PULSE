@@ -25,7 +25,7 @@ const NAV = {
   master: [["reports", "nav.reports"], ["users", "nav.users"], ["imports", "nav.imports"], ["comments", "nav.comments"], ["dashboard", "nav.dashboard"], ["myteam", "nav.myteam"], ["doctracking", "nav.doctracking"], ["portfolio", "nav.portfolio"], ["events", "nav.events"], ["activities", "nav.activities"], ["navi", "nav.navi"], ["help", "nav.help"], ["ai", "nav.ai"], ["profile", "nav.profile"]],
   rm: [["team", "nav.team"], ["myteam", "nav.myteam"], ["bonus", "nav.bonus"], ["dashboard", "nav.dashboard"], ["doctracking", "nav.doctracking"], ["portfolio", "nav.portfolio"], ["events", "nav.events"], ["activities", "nav.activities"], ["navi", "nav.navi"], ["help", "nav.help"], ["ai", "nav.ai"], ["profile", "nav.profile"]],
   mp: [["report", "nav.myreport"], ["doctracking", "nav.doctracking"], ["portfolio", "nav.portfolio"], ["events", "nav.events"], ["activities", "nav.activities"], ["navi", "nav.navi"], ["help", "nav.help"], ["ai", "nav.ai"], ["profile", "nav.profile"]],
-  bm: [["reports", "nav.reports"], ["dashboard", "nav.dashboard"], ["myteam", "nav.myteam"], ["doctracking", "nav.doctracking"], ["portfolio", "nav.portfolio"], ["events", "nav.events"], ["activities", "nav.activities"], ["navi", "nav.navi"], ["help", "nav.help"], ["profile", "nav.profile"]],
+  bm: [["reports", "nav.reports"], ["dashboard", "nav.dashboard"], ["myteam", "nav.myteam"], ["doctracking", "nav.doctracking"], ["portfolio", "nav.portfolio"], ["events", "nav.events"], ["activities", "nav.activities"], ["navi", "nav.navi"], ["help", "nav.help"], ["ai", "nav.ai"], ["profile", "nav.profile"]],
 };
 const DEFAULT_SECTION = { master: "reports", rm: "team", mp: "report", bm: "reports" };
 
@@ -146,6 +146,7 @@ export default function App() {
       {user.role === "bm" && section === "activities" && <ActivitiesPage user={user} category="activity" />}
       {user.role === "bm" && section === "navi" && <NaviList user={user} />}
       {user.role === "bm" && section === "help" && <HelpPage />}
+      {user.role === "bm" && section === "ai" && <AiInsights />}
       {user.role === "bm" && section === "profile" && <Profile user={user} onUpdated={setUser} />}
     </div>
   );
