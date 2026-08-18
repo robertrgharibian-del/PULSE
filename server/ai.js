@@ -222,32 +222,23 @@ async function buildAnalyticsContext(pool, { mpIds, label, scope, rmIds }) {
 
 const NO_DASH_RULE = "Никогда не используй длинное тире (—) или короткое тире (–) — только обычный дефис (-) или перестрой предложение. Не используй markdown-разметку.";
 
-async function callClaude(context) {
-  const hasTeam = (context.per_mp && context.per_mp.length > 0) || (context.per_rm && context.per_rm.length > 0);
-  const system = `Ты — senior аналитик фармацевтических продаж (field force effectiveness) для команды медпредставителей в Узбекистане.
-Тебе дают структурированные данные: план/факт продаж (FSS) по месяцам/кварталам/годам в долларах, FFE score, комментарии медпредов о причинах невыполнения,
-сводку по работе с Конверсией врачей (сколько было запланировано и сколько реально достигнуто), сводку по работе с Увеличением потенциала (аналогично),
-сводку по работе NAVI с "трудными" врачами (сколько врачей под наблюдением, сколько визитов проведено, сколько дали положительный результат)${hasTeam ? ", и разбивку по каждому сотруднику (медпредставителю" + (context.per_rm?.length ? " и региональному менеджеру" : "") + ")" : ""}.
-Дай ГЛУБОКИЙ, полный, ничем не ограниченный по длине анализ: тренды месяц-к-месяцу, квартал-к-кварталу, год-к-году, аномалии, риски, сильные и слабые препараты/территории,
-качество работы по конверсии и увеличению потенциала, эффективность работы NAVI с трудными врачами.
-${NO_DASH_RULE}
-Отвечай СТРОГО в формате JSON (без markdown-разметки, без \`\`\`), на русском языке, со следующей структурой:
-{
-  "summary": "3-5 предложений — главный вывод",
-  "monthly_dynamics": "подробный анализ динамики месяц-к-месяцу",
-  "quarterly_dynamics": "подробный анализ динамики квартал-к-кварталу",
-  "yearly_dynamics": "анализ динамики год-к-году (если данных недостаточно — так и напиши)",
-  "conversion_potential_analysis": "анализ качества работы по Конверсии врачей и по Увеличению потенциала: выполняются ли планы, где проблемы",
-  "navi_analysis": "анализ работы с трудными врачами через NAVI: масштаб охвата, результативность визитов",
-  "risks": ["риск 1", "риск 2", ...],
-  "short_term_recommendations": ["конкретная рекомендация на 1-4 недели", ...],
-  "long_term_recommendations": ["стратегическая рекомендация на квартал+", ...]${hasTeam ? `,
-  "team_analysis": [ { "name": "имя сотрудника", "role": "МП или РМ", "assessment": "оценка эффективности и продуктивности этого сотрудника: 3-5 предложений, с конкретными цифрами из данных" }, ... — по каждому сотруднику из per_mp и per_rm ],
-  "employee_recommendations": [ { "name": "имя сотрудника", "role": "МП или РМ", "monthly": "рекомендация на месяц", "quarterly": "рекомендация на квартал", "yearly": "рекомендация на год" }, ... — по каждому сотруднику ],
-  "business_recommendations": { "monthly": "общая рекомендация по бизнесу на месяц", "quarterly": "на квартал", "yearly": "на год" }` : ""}
+// Robustly pull a JSON object out of a model response: strips ```json fences
+// if present, then falls back to the outermost {...} span if there's any
+// stray text around the JSON.
+function extractJson(text) {
+  let t = text.trim();
+  const fenceMatch = t.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenceMatch) t = fenceMatch[1].trim();
+  try { return JSON.parse(t); } catch (e) {}
+  const start = t.indexOf("{");
+  const end = t.lastIndexOf("}");
+  if (start !== -1 && end !== -1 && end > start) {
+    try { return JSON.parse(t.slice(start, end + 1)); } catch (e) {}
+  }
+  return null;
 }
-Отвечай по существу, с конкретными цифрами из переданных данных, без общих фраз. Не сокращай и не обрывай ответ — раскрывай каждый пункт полностью.`;
 
+async function callAnthropic(system, context, maxTokens) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -257,7 +248,7 @@ ${NO_DASH_RULE}
     },
     body: JSON.stringify({
       model: AI_MODEL,
-      max_tokens: 8000,
+      max_tokens: maxTokens,
       system,
       messages: [{ role: "user", content: JSON.stringify(context) }],
     }),
@@ -269,19 +260,78 @@ ${NO_DASH_RULE}
   const data = await res.json();
   const stopReason = data.stop_reason;
   const text = (data.content || []).map((b) => b.text || "").join("");
-  try {
-    const parsed = JSON.parse(text);
+  const parsed = extractJson(text);
+  return { parsed, stopReason, rawLength: text.length };
+}
+
+const CORE_SCHEMA = `{
+  "summary": "3-5 предложений — главный вывод",
+  "monthly_dynamics": "подробный анализ динамики месяц-к-месяцу",
+  "quarterly_dynamics": "подробный анализ динамики квартал-к-кварталу",
+  "yearly_dynamics": "анализ динамики год-к-году (если данных недостаточно — так и напиши)",
+  "conversion_potential_analysis": "анализ качества работы по Конверсии врачей и по Увеличению потенциала: выполняются ли планы, где проблемы",
+  "navi_analysis": "анализ работы с трудными врачами через NAVI: масштаб охвата, результативность визитов",
+  "risks": ["риск 1", "риск 2", ...],
+  "short_term_recommendations": ["конкретная рекомендация на 1-4 недели", ...],
+  "long_term_recommendations": ["стратегическая рекомендация на квартал+", ...]
+}`;
+
+/** Core narrative analysis: trends, risks, recommendations. Has its own token budget so it never competes with the (potentially large) team breakdown for space. */
+async function callClaude(context) {
+  const system = `Ты — senior аналитик фармацевтических продаж (field force effectiveness) для команды медпредставителей в Узбекистане.
+Тебе дают структурированные данные: план/факт продаж (FSS) по месяцам/кварталам/годам в долларах, FFE score, комментарии медпредов о причинах невыполнения,
+сводку по работе с Конверсией врачей (сколько было запланировано и сколько реально достигнуто), сводку по работе с Увеличением потенциала (аналогично),
+сводку по работе NAVI с "трудными" врачами (сколько врачей под наблюдением, сколько визитов проведено, сколько дали положительный результат).
+Дай ГЛУБОКИЙ, содержательный анализ: тренды месяц-к-месяцу, квартал-к-кварталу, год-к-году, аномалии, риски, сильные и слабые препараты/территории,
+качество работы по конверсии и увеличению потенциала, эффективность работы NAVI с трудными врачами.
+${NO_DASH_RULE}
+Отвечай СТРОГО в формате JSON (без markdown-разметки, без \`\`\`), на русском языке, ЦЕЛИКОМ ПОМЕЩАЯСЬ в разумный объём (2-4 абзаца на каждый текстовый пункт, не эссе), со следующей структурой:
+${CORE_SCHEMA}
+Отвечай по существу, с конкретными цифрами из переданных данных, без общих фраз. Обязательно заверши JSON полностью (закрой все скобки) — лучше короче, но полностью, чем длиннее и оборвано.`;
+
+  const { parsed, stopReason } = await callAnthropic(system, context, 4000);
+  if (parsed) {
     if (stopReason === "max_tokens") parsed._truncated = true;
     return parsed;
-  } catch (e) {
-    console.error("AI insights: failed to parse JSON response (stop_reason=" + stopReason + "):", e.message);
-    return {
-      summary: "Анализ не удалось полностью разобрать (возможно, ответ был обрезан). Нажмите «Обновить анализ», чтобы попробовать снова.",
-      monthly_dynamics: "", quarterly_dynamics: "", yearly_dynamics: "", conversion_potential_analysis: "", navi_analysis: "",
-      risks: [], short_term_recommendations: [], long_term_recommendations: [], team_analysis: [], employee_recommendations: [], business_recommendations: null,
-      _parse_error: true, _raw_preview: text.slice(0, 500),
-    };
   }
+  console.error(`AI insights: core analysis JSON parse failed (stop_reason=${stopReason})`);
+  return {
+    summary: "Основной анализ не удалось разобрать. Нажмите «Обновить анализ», чтобы попробовать снова.",
+    monthly_dynamics: "", quarterly_dynamics: "", yearly_dynamics: "", conversion_potential_analysis: "", navi_analysis: "",
+    risks: [], short_term_recommendations: [], long_term_recommendations: [], _parse_error: true,
+  };
+}
+
+/** Team breakdown + per-employee/business recommendations: a separate call (own token budget) so a large team never truncates the core analysis, and vice versa. */
+async function callClaudeTeamAnalysis(context) {
+  const teamContext = {
+    label: context.label,
+    per_mp: context.per_mp, per_rm: context.per_rm,
+    conversion_summary: context.conversion_summary, potential_summary: context.potential_summary, navi_summary: context.navi_summary,
+    months: context.months.slice(-6), quarterly: context.quarterly,
+  };
+  const peopleCount = (context.per_mp?.length || 0) + (context.per_rm?.length || 0);
+  const briefRule = peopleCount > 10 ? "Команда большая — держи оценку и каждую рекомендацию по сотруднику в пределах 1-2 коротких предложений, без исключений." : "Оценка и рекомендации по сотруднику — 2-3 содержательных предложения.";
+  const system = `Ты — HR-бизнес-партнёр и аналитик эффективности для фармацевтической команды в Узбекистане.
+Тебе дают показатели эффективности по каждому сотруднику (медпредставителю${context.per_rm?.length ? " и региональному менеджеру" : ""}): последнее и среднее выполнение плана, вклад в конверсию/потенциал.
+Дай оценку каждому сотруднику и рекомендации по развитию.
+${briefRule}
+${NO_DASH_RULE}
+Отвечай СТРОГО в формате JSON (без markdown, без \`\`\`), на русском языке:
+{
+  "team_analysis": [ { "name": "имя сотрудника", "role": "МП или РМ", "assessment": "оценка эффективности и продуктивности, с цифрами" }, ... — один объект на каждого сотрудника из per_mp и per_rm, без пропусков ],
+  "employee_recommendations": [ { "name": "имя сотрудника", "role": "МП или РМ", "monthly": "рекомендация на месяц", "quarterly": "рекомендация на квартал", "yearly": "рекомендация на год" }, ... — один объект на каждого сотрудника ],
+  "business_recommendations": { "monthly": "общая рекомендация по бизнесу на месяц", "quarterly": "на квартал", "yearly": "на год" }
+}
+Обязательно включи ВСЕХ сотрудников из переданных данных, ни одного не пропускай. Обязательно заверши JSON полностью (закрой все скобки).`;
+
+  const { parsed, stopReason } = await callAnthropic(system, teamContext, 8000);
+  if (parsed) {
+    if (stopReason === "max_tokens") parsed._team_truncated = true;
+    return parsed;
+  }
+  console.error(`AI insights: team analysis JSON parse failed (stop_reason=${stopReason})`);
+  return { team_analysis: [], employee_recommendations: [], business_recommendations: null, _team_parse_error: true };
 }
 
 /**
@@ -354,4 +404,4 @@ ${NO_DASH_RULE}
   }
 }
 
-module.exports = { aiEnabled, AI_MODEL, buildAnalyticsContext, callClaude, callClaudeForNavi };
+module.exports = { aiEnabled, AI_MODEL, buildAnalyticsContext, callClaude, callClaudeTeamAnalysis, callClaudeForNavi };

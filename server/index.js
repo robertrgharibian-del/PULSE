@@ -15,7 +15,7 @@ const { PDFDocument: PdfLibDocument } = require("pdf-lib");
 const cron = require("node-cron");
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 const { TERRITORIES, parseFssWorkbook, parseTargetsWorkbook, monthToCalendarYear } = require("./import.js");
-const { aiEnabled, AI_MODEL, buildAnalyticsContext, callClaude, callClaudeForNavi } = require("./ai.js");
+const { aiEnabled, AI_MODEL, buildAnalyticsContext, callClaude, callClaudeTeamAnalysis, callClaudeForNavi } = require("./ai.js");
 
 const app = express();
 app.use(cors({ origin: process.env.CLIENT_URL || "*" }));
@@ -2658,9 +2658,21 @@ app.get("/api/ai-insights", auth, async (req, res) => {
     return res.status(502).json({ error: "Не удалось получить анализ от ИИ. Попробуйте позже." });
   }
 
+  const hasTeam = (context.per_mp && context.per_mp.length > 0) || (context.per_rm && context.per_rm.length > 0);
+  let teamContent = { team_analysis: [], employee_recommendations: [], business_recommendations: null };
+  if (hasTeam) {
+    try {
+      teamContent = await callClaudeTeamAnalysis(context);
+    } catch (e) {
+      console.error("AI insights team analysis error:", e.message);
+      // Don't fail the whole request — the core analysis above is still valid and useful on its own
+      teamContent._team_error = "Не удалось получить анализ команды. Попробуйте «Обновить анализ» ещё раз.";
+    }
+  }
+
   // Real, non-hallucinated numbers for charts — computed server-side, not from the AI's text
   const chart_data = { months: context.months, quarterly: context.quarterly, yearly: context.yearly, per_mp: context.per_mp, per_rm: context.per_rm };
-  const fullContent = { ...content, chart_data };
+  const fullContent = { ...content, ...teamContent, chart_data };
 
   await pool.query(
     "insert into ai_insights (scope, scope_id, content, model) values ($1,$2,$3,$4)",
