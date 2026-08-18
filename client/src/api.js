@@ -160,8 +160,8 @@ export const api = {
     const params = new URLSearchParams();
     if (scope?.mp_id) params.set("mp_id", scope.mp_id);
     if (scope?.rm_id) params.set("rm_id", scope.rm_id);
-    params.set("token", localStorage.getItem("fss_token"));
-    return `${BASE}/api/ai-insights/export.${format}?${params.toString()}`;
+    const qs = params.toString();
+    return `${BASE}/api/ai-insights/export.${format}${qs ? `?${qs}` : ""}`;
   },
   dashboard: () => request("/api/dashboard"),
   importHistory: () => request("/api/import/history"),

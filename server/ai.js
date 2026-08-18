@@ -238,6 +238,21 @@ function extractJson(text) {
   return null;
 }
 
+// Last-resort salvage for a response that got cut off mid-stream (so brace
+// matching alone can't recover it): regex-pull each top-level "key": "..."
+// string field that DID finish before the cutoff. Anything past the cutoff
+// point is simply absent from the result — never guessed or hallucinated.
+function salvageStringFields(text, keys) {
+  const out = {};
+  for (const key of keys) {
+    const m = text.match(new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`));
+    if (m) {
+      try { out[key] = JSON.parse(`"${m[1]}"`); } catch (e) {}
+    }
+  }
+  return out;
+}
+
 async function callAnthropic(system, context, maxTokens) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -261,7 +276,7 @@ async function callAnthropic(system, context, maxTokens) {
   const stopReason = data.stop_reason;
   const text = (data.content || []).map((b) => b.text || "").join("");
   const parsed = extractJson(text);
-  return { parsed, stopReason, rawLength: text.length };
+  return { parsed, stopReason, rawText: text };
 }
 
 const CORE_SCHEMA = `{
@@ -282,22 +297,28 @@ async function callClaude(context) {
 Тебе дают структурированные данные: план/факт продаж (FSS) по месяцам/кварталам/годам в долларах, FFE score, комментарии медпредов о причинах невыполнения,
 сводку по работе с Конверсией врачей (сколько было запланировано и сколько реально достигнуто), сводку по работе с Увеличением потенциала (аналогично),
 сводку по работе NAVI с "трудными" врачами (сколько врачей под наблюдением, сколько визитов проведено, сколько дали положительный результат).
-Дай ГЛУБОКИЙ, содержательный анализ: тренды месяц-к-месяцу, квартал-к-кварталу, год-к-году, аномалии, риски, сильные и слабые препараты/территории,
+Дай содержательный анализ: тренды месяц-к-месяцу, квартал-к-кварталу, год-к-году, аномалии, риски, сильные и слабые препараты/территории,
 качество работы по конверсии и увеличению потенциала, эффективность работы NAVI с трудными врачами.
 ${NO_DASH_RULE}
-Отвечай СТРОГО в формате JSON (без markdown-разметки, без \`\`\`), на русском языке, ЦЕЛИКОМ ПОМЕЩАЯСЬ в разумный объём (2-4 абзаца на каждый текстовый пункт, не эссе), со следующей структурой:
+Отвечай СТРОГО в формате JSON (без markdown-разметки, без \`\`\`), на русском языке, со следующей структурой:
 ${CORE_SCHEMA}
-Отвечай по существу, с конкретными цифрами из переданных данных, без общих фраз. Обязательно заверши JSON полностью (закрой все скобки) — лучше короче, но полностью, чем длиннее и оборвано.`;
+ВАЖНО: каждый текстовый пункт — строго не более 500 символов (3-4 предложения), каждый пункт в risks/recommendations — не более 150 символов.
+Это жёсткое ограничение, чтобы ответ гарантированно уместился целиком. Отвечай по существу, с конкретными цифрами из данных, без общих фраз.
+Обязательно заверши JSON полностью, закрой все скобки — короткий и полный ответ намного важнее длинного и оборванного.`;
 
-  const { parsed, stopReason } = await callAnthropic(system, context, 4000);
+  const { parsed, stopReason, rawText } = await callAnthropic(system, context, 6000);
   if (parsed) {
     if (stopReason === "max_tokens") parsed._truncated = true;
     return parsed;
   }
-  console.error(`AI insights: core analysis JSON parse failed (stop_reason=${stopReason})`);
+  console.error(`AI insights: core analysis JSON parse failed (stop_reason=${stopReason}, length=${rawText.length})`);
+  // Salvage whatever top-level fields DID complete before the cutoff, rather than showing nothing
+  const salvaged = salvageStringFields(rawText, ["summary", "monthly_dynamics", "quarterly_dynamics", "yearly_dynamics", "conversion_potential_analysis", "navi_analysis"]);
   return {
-    summary: "Основной анализ не удалось разобрать. Нажмите «Обновить анализ», чтобы попробовать снова.",
-    monthly_dynamics: "", quarterly_dynamics: "", yearly_dynamics: "", conversion_potential_analysis: "", navi_analysis: "",
+    summary: salvaged.summary || "Анализ пришёл не полностью (обрыв ответа ИИ). Нажмите «Обновить анализ», чтобы попробовать снова.",
+    monthly_dynamics: salvaged.monthly_dynamics || "", quarterly_dynamics: salvaged.quarterly_dynamics || "",
+    yearly_dynamics: salvaged.yearly_dynamics || "", conversion_potential_analysis: salvaged.conversion_potential_analysis || "",
+    navi_analysis: salvaged.navi_analysis || "",
     risks: [], short_term_recommendations: [], long_term_recommendations: [], _parse_error: true,
   };
 }
@@ -311,19 +332,21 @@ async function callClaudeTeamAnalysis(context) {
     months: context.months.slice(-6), quarterly: context.quarterly,
   };
   const peopleCount = (context.per_mp?.length || 0) + (context.per_rm?.length || 0);
-  const briefRule = peopleCount > 10 ? "Команда большая — держи оценку и каждую рекомендацию по сотруднику в пределах 1-2 коротких предложений, без исключений." : "Оценка и рекомендации по сотруднику — 2-3 содержательных предложения.";
+  const briefRule = peopleCount > 10
+    ? "Команда большая — держи оценку и каждую рекомендацию по сотруднику строго в пределах 120 символов (1 короткое предложение), без исключений."
+    : "Оценка и каждая рекомендация по сотруднику — строго не более 250 символов (2 предложения).";
   const system = `Ты — HR-бизнес-партнёр и аналитик эффективности для фармацевтической команды в Узбекистане.
 Тебе дают показатели эффективности по каждому сотруднику (медпредставителю${context.per_rm?.length ? " и региональному менеджеру" : ""}): последнее и среднее выполнение плана, вклад в конверсию/потенциал.
 Дай оценку каждому сотруднику и рекомендации по развитию.
-${briefRule}
+${briefRule} Это жёсткое ограничение длины, чтобы ответ гарантированно уместился целиком для всех ${peopleCount} сотрудников.
 ${NO_DASH_RULE}
 Отвечай СТРОГО в формате JSON (без markdown, без \`\`\`), на русском языке:
 {
   "team_analysis": [ { "name": "имя сотрудника", "role": "МП или РМ", "assessment": "оценка эффективности и продуктивности, с цифрами" }, ... — один объект на каждого сотрудника из per_mp и per_rm, без пропусков ],
   "employee_recommendations": [ { "name": "имя сотрудника", "role": "МП или РМ", "monthly": "рекомендация на месяц", "quarterly": "рекомендация на квартал", "yearly": "рекомендация на год" }, ... — один объект на каждого сотрудника ],
-  "business_recommendations": { "monthly": "общая рекомендация по бизнесу на месяц", "quarterly": "на квартал", "yearly": "на год" }
+  "business_recommendations": { "monthly": "общая рекомендация по бизнесу на месяц (до 300 символов)", "quarterly": "на квартал (до 300 символов)", "yearly": "на год (до 300 символов)" }
 }
-Обязательно включи ВСЕХ сотрудников из переданных данных, ни одного не пропускай. Обязательно заверши JSON полностью (закрой все скобки).`;
+Обязательно включи ВСЕХ сотрудников из переданных данных, ни одного не пропускай. Обязательно заверши JSON полностью (закрой все скобки) — короткий полный ответ важнее длинного оборванного.`;
 
   const { parsed, stopReason } = await callAnthropic(system, teamContext, 8000);
   if (parsed) {

@@ -142,8 +142,8 @@ export default function AiInsights() {
 
       {data && (
         <div className="flex flex-wrap gap-2 mb-4">
-          <button onClick={() => authedDownload(api.aiInsightsExportUrl("xlsx", currentScopeParam()))} className="px-4 py-2 rounded text-sm" style={{ background: "#E4E7F0" }}>Скачать Excel</button>
-          <button onClick={() => authedDownload(api.aiInsightsExportUrl("pptx", currentScopeParam()))} className="px-4 py-2 rounded text-sm" style={{ background: "#E4E7F0" }}>Скачать PPTX</button>
+          <button onClick={() => authedDownload(api.aiInsightsExportUrl("xlsx", currentScopeParam())).catch((e) => setError(e.message))} className="px-4 py-2 rounded text-sm" style={{ background: "#E4E7F0" }}>Скачать Excel</button>
+          <button onClick={() => authedDownload(api.aiInsightsExportUrl("pptx", currentScopeParam())).catch((e) => setError(e.message))} className="px-4 py-2 rounded text-sm" style={{ background: "#E4E7F0" }}>Скачать PPTX</button>
         </div>
       )}
 
