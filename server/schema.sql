@@ -410,7 +410,8 @@ create table if not exists navi_doctor_products (
   id              bigserial primary key,
   doctor_id       bigint not null references navi_doctors(id) on delete cascade,
   product_id      bigint not null references products(id),
-  prescriptions   int not null default 0
+  prescriptions   int not null default 0,
+  unique (doctor_id, product_id)
 );
 create index if not exists idx_navi_doctor_products_doctor on navi_doctor_products(doctor_id);
 create table if not exists navi_visits (
@@ -424,6 +425,15 @@ create table if not exists navi_visits (
   reported_at       timestamptz
 );
 create index if not exists idx_navi_visits_doctor on navi_visits(doctor_id, created_at desc);
+
+-- migration 015 (kept in sync here for fresh installs — see migration_015.sql for existing DBs)
+alter table navi_visits add column if not exists visit_goal text;
+alter table navi_visits add column if not exists visit_products jsonb default '[]';
+alter table navi_visits add column if not exists ai_sections jsonb;
+alter table navi_visits add column if not exists visual_aid_id bigint references product_visual_aids(id);
+alter table navi_visits add column if not exists promo_material_id bigint references product_promo_materials(id);
+alter table navi_visits add column if not exists post_visit_brands jsonb default '[]';
+alter table navi_visits add column if not exists post_visit_agreements jsonb default '[]';
 
 -- migration 014 (kept in sync here for fresh installs — see migration_014.sql for existing DBs)
 create table if not exists report_opportunities (

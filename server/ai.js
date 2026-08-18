@@ -179,23 +179,40 @@ ${NO_DASH_RULE}
 }
 
 /**
- * NAVI — pre-visit coaching. Analyzes a doctor's profile, which portfolio
- * products they already prescribe, and the full history of past visits
- * (NAVI's prior recommendations + what the MP actually reported), and
- * returns realistic, concrete tactics for today's visit. Responds in the
- * MP's current UI language (ru/uz) — no separate setup needed.
+ * NAVI — pre-visit coaching. Analyzes a doctor's profile, the MP's pre-visit
+ * plan (goal + per-brand current/potential/competitors/target), the full
+ * visit history, and the group's available Portfolio Visual Aid slides and
+ * Promo materials, then returns a structured, sectioned recommendation in
+ * the MP's current UI language (ru/uz) — no separate setup needed.
  */
 async function callClaudeForNavi(context, lang) {
   const langName = lang === "uz" ? "узбекском (o'zbek tili, латиница)" : "русском";
   const system = `Ты — NAVI, опытный полевой ИИ-коуч для медицинских представителей фармацевтической компании MSN в Узбекистане.
-Тебе дают карточку врача (специальность, стаж, психотип, сколько времени обычно даёт на визит, потребности, особенности поведения),
-список наших препаратов, которые врач уже назначает, и полную историю прошлых визитов (что советовала NAVI и что реально сделал МП).
-Проанализируй прогресс от визита к визиту и дай КОНКРЕТНЫЕ, реалистичные, применимые на практике рекомендации для сегодняшнего визита:
-как начать разговор, на что сделать акцент с учётом психотипа и потребностей врача, какие препараты и аргументы использовать, чего избегать,
-как уложиться в отведённое время визита, и конкретный следующий шаг.
-Отвечай ТОЛЬКО на ${langName} языке, простым связным текстом (без JSON, без markdown, без списков с звёздочками — обычные абзацы, при необходимости — короткие пронумерованные пункты).
+Тебе дают: карточку врача (специальность, стаж, психотип, время на визит, потребности, поведение), план МП на сегодняшний визит
+(цель визита текстом + по каждому бренду: сколько врач уже назначает в неделю, его общий потенциал по этому диагнозу в неделю,
+каких конкурентов и сколько он назначает, целевая цифра назначений нашего бренда, которую МП хочет получить по итогам визита),
+полную историю прошлых визитов (что советовала NAVI, что МП реально сделал, и результаты прошлых визитов: сколько фактически
+назначает по брендам в месяц и о чём договорились на прошлых визитах), а также список доступных материалов из Портфолио:
+слайды Visual Aid (с их содержанием и целью) и промо материалы (с их типом, аудиторией и содержанием) по брендам этого визита.
+
+Проанализируй прогресс от визита к визиту и дай КОНКРЕТНЫЕ, реалистичные, применимые на практике рекомендации.
 ${NO_DASH_RULE}
-Объём — примерно 150-300 слов, по существу, без общих фраз.`;
+Отвечай СТРОГО в формате JSON (без markdown, без \`\`\`), на ${langName} языке, со следующими ключами (каждый — связный текст абзацами, не список с звёздочками):
+{
+  "prior_analysis": "краткий анализ предыдущей работы с этим врачом: что уже пробовали, что сработало, что нет",
+  "general_recommendations": "общие рекомендации по сегодняшнему визиту",
+  "technique": "какую технику визита (или комбинацию техник, например SPIN, Challenger Sale, Consultative Selling и т.п.) стоит использовать и почему, с учётом психотипа врача",
+  "what_to_say": "что и как конкретно нужно говорить на визите",
+  "what_to_avoid": "чего нужно избегать на этом визите",
+  "must_not_do": "чего категорически делать нельзя с этим врачом",
+  "timing": "тайминг визита поминутно, с учётом отведённого времени (например: 0-1 мин — приветствие, 1-3 мин — ... и т.д.)",
+  "closing": "как сделать договорённость в конце визита, конкретная формулировка просьбы",
+  "visual_aid_id": <id слайда из списка available_visual_aids, который лучше всего использовать на этом визите, или null если ни один не подходит>,
+  "visual_aid_script": "если visual_aid_id указан: что именно из этого слайда и как озвучить врачу; иначе пустая строка",
+  "promo_material_id": <id материала из списка available_promo_materials, который лучше всего использовать, или null>,
+  "promo_material_script": "если promo_material_id указан: что именно из этого материала и как озвучить врачу; иначе пустая строка"
+}
+Выбирай visual_aid_id и promo_material_id ТОЛЬКО из id, реально присутствующих в переданных списках available_visual_aids/available_promo_materials. Если списки пустые — оба поля null.`;
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -206,7 +223,7 @@ ${NO_DASH_RULE}
     },
     body: JSON.stringify({
       model: AI_MODEL,
-      max_tokens: 1200,
+      max_tokens: 2500,
       system,
       messages: [{ role: "user", content: JSON.stringify(context) }],
     }),
@@ -216,7 +233,19 @@ ${NO_DASH_RULE}
     throw new Error(`Anthropic API error ${res.status}: ${text.slice(0, 300)}`);
   }
   const data = await res.json();
-  return (data.content || []).map((b) => b.text || "").join("").trim();
+  const text = (data.content || []).map((b) => b.text || "").join("").trim();
+  try {
+    const parsed = JSON.parse(text);
+    return {
+      prior_analysis: parsed.prior_analysis || "", general_recommendations: parsed.general_recommendations || "",
+      technique: parsed.technique || "", what_to_say: parsed.what_to_say || "", what_to_avoid: parsed.what_to_avoid || "",
+      must_not_do: parsed.must_not_do || "", timing: parsed.timing || "", closing: parsed.closing || "",
+      visual_aid_id: parsed.visual_aid_id || null, visual_aid_script: parsed.visual_aid_script || "",
+      promo_material_id: parsed.promo_material_id || null, promo_material_script: parsed.promo_material_script || "",
+    };
+  } catch (e) {
+    return { prior_analysis: text, general_recommendations: "", technique: "", what_to_say: "", what_to_avoid: "", must_not_do: "", timing: "", closing: "", visual_aid_id: null, visual_aid_script: "", promo_material_id: null, promo_material_script: "" };
+  }
 }
 
 module.exports = { aiEnabled, AI_MODEL, buildAnalyticsContext, callClaude, callClaudeForNavi };

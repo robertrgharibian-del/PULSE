@@ -1062,7 +1062,11 @@ app.get("/api/navi/doctors/:id", auth, async (req, res) => {
   const productsRes = await pool.query(
     `select dp.*, p.name as product_name from navi_doctor_products dp join products p on p.id=dp.product_id where dp.doctor_id=$1`, [id]
   );
-  const visitsRes = await pool.query("select * from navi_visits where doctor_id=$1 order by created_at desc", [id]);
+  const visitsRes = await pool.query(
+    `select v.*, pm.file_mime = 'application/pdf' as promo_material_is_pdf
+     from navi_visits v left join product_promo_materials pm on pm.id=v.promo_material_id
+     where v.doctor_id=$1 order by v.created_at desc`, [id]
+  );
   res.json({ doctor: dRes.rows[0], products: productsRes.rows, visits: visitsRes.rows, can_edit: req.user.role === "mp" && dRes.rows[0].mp_id === req.user.id });
 });
 
@@ -1099,38 +1103,84 @@ app.delete("/api/navi/doctors/:id", auth, requireRole("mp"), async (req, res) =>
 app.post("/api/navi/doctors/:id/start-visit", auth, requireRole("mp"), async (req, res) => {
   if (!aiEnabled) return res.status(503).json({ error: "NAVI не настроен на сервере (нет ANTHROPIC_API_KEY)" });
   const { id } = req.params;
-  const { lang } = req.body;
+  const { lang, visit_goal, products } = req.body;
   const check = await pool.query("select mp_id from navi_doctors where id=$1", [id]);
   if (!check.rows[0] || check.rows[0].mp_id !== req.user.id) return res.status(403).json({ error: "Forbidden" });
 
   const dRes = await pool.query("select * from navi_doctors where id=$1", [id]);
-  const productsRes = await pool.query(
-    `select p.name as product_name, dp.prescriptions from navi_doctor_products dp join products p on p.id=dp.product_id where dp.doctor_id=$1`, [id]
+  const historicalPrescriptionsRes = await pool.query(
+    `select dp.product_id, p.name as product_name, dp.prescriptions from navi_doctor_products dp join products p on p.id=dp.product_id where dp.doctor_id=$1`, [id]
   );
   const visitsRes = await pool.query(
-    "select visit_date, ai_recommendation, mp_report from navi_visits where doctor_id=$1 and mp_report is not null order by created_at asc", [id]
+    "select visit_date, visit_goal, visit_products, ai_sections, mp_report, post_visit_brands, post_visit_agreements from navi_visits where doctor_id=$1 and mp_report is not null order by created_at asc", [id]
   );
+
+  const visitProducts = Array.isArray(products) ? products : [];
+  const productIds = visitProducts.map((p) => p.product_id).filter(Boolean);
+  const nameByProductId = Object.fromEntries(historicalPrescriptionsRes.rows.map((r) => [r.product_id, r.product_name]));
+  if (productIds.length) {
+    const namesRes = await pool.query("select id, name from products where id = any($1::bigint[])", [productIds]);
+    for (const r of namesRes.rows) nameByProductId[r.id] = r.name;
+  }
+
+  // Portfolio materials available for this visit's brands, scoped to the MP's group
+  let availableVisualAids = [], availablePromoMaterials = [];
+  if (productIds.length) {
+    const vaRes = await pool.query(
+      `select va.id, va.image_name, va.content_desc, va.purpose, va.detail_script, p.name as product_name
+       from product_visual_aids va join products p on p.id=va.product_id
+       where va.product_id = any($1::bigint[]) and p.group_id=$2`,
+      [productIds, req.user.group_id]
+    );
+    availableVisualAids = vaRes.rows;
+    const pmRes = await pool.query(
+      `select pm.id, pm.material_name, pm.material_type, pm.target_audience, pm.content_desc, pm.purpose, pm.detail_script, p.name as product_name
+       from product_promo_materials pm join products p on p.id=pm.product_id
+       where pm.product_id = any($1::bigint[]) and p.group_id=$2`,
+      [productIds, req.user.group_id]
+    );
+    availablePromoMaterials = pmRes.rows;
+  }
 
   const context = {
     doctor: {
       specialty: dRes.rows[0].specialty, experience_years: dRes.rows[0].experience_years, psychotype: dRes.rows[0].psychotype,
       visit_minutes: dRes.rows[0].visit_minutes, needs: dRes.rows[0].needs, behavior: dRes.rows[0].behavior, city: dRes.rows[0].city, lpu: dRes.rows[0].lpu,
     },
-    prescribes_currently: productsRes.rows.map((p) => ({ product: p.product_name, prescriptions: p.prescriptions })),
-    past_visits: visitsRes.rows.map((v) => ({ date: v.visit_date, navi_advised: v.ai_recommendation, mp_did: v.mp_report })),
+    visit_goal: visit_goal || "",
+    visit_plan_by_brand: visitProducts.map((p) => ({
+      brand: nameByProductId[p.product_id] || "—",
+      current_rx_per_week: p.current_rx_per_week ?? null,
+      doctor_potential_per_week: p.potential_per_week ?? null,
+      competitors: (p.competitors || []).map((c) => ({ name: c.name, rx_per_week: c.rx_per_week })),
+      target_rx_per_week_for_this_visit: p.target_rx_per_week ?? null,
+    })),
+    past_visits: visitsRes.rows.map((v) => ({
+      date: v.visit_date, goal_was: v.visit_goal, plan_was: v.visit_products, navi_advised: v.ai_sections,
+      mp_report_text: v.mp_report, actual_monthly_by_brand: v.post_visit_brands, agreements_made: v.post_visit_agreements,
+    })),
+    available_visual_aids: availableVisualAids.map((va) => ({ id: va.id, brand: va.product_name, name: va.image_name, content: va.content_desc, purpose: va.purpose, script: va.detail_script })),
+    available_promo_materials: availablePromoMaterials.map((pm) => ({ id: pm.id, brand: pm.product_name, name: pm.material_name, type: pm.material_type, audience: pm.target_audience, content: pm.content_desc, purpose: pm.purpose, script: pm.detail_script })),
   };
 
-  let recommendation;
+  let sections;
   try {
-    recommendation = await callClaudeForNavi(context, lang === "uz" ? "uz" : "ru");
+    sections = await callClaudeForNavi(context, lang === "uz" ? "uz" : "ru");
   } catch (e) {
     console.error("NAVI error:", e.message);
     return res.status(502).json({ error: "Не удалось получить рекомендацию от NAVI. Попробуйте позже." });
   }
 
+  // Guard: only accept material ids that were actually offered to the model
+  const validVaIds = new Set(availableVisualAids.map((v) => v.id));
+  const validPmIds = new Set(availablePromoMaterials.map((v) => v.id));
+  const visualAidId = validVaIds.has(sections.visual_aid_id) ? sections.visual_aid_id : null;
+  const promoMaterialId = validPmIds.has(sections.promo_material_id) ? sections.promo_material_id : null;
+
   const { rows } = await pool.query(
-    "insert into navi_visits (doctor_id, ai_recommendation, ai_lang) values ($1,$2,$3) returning *",
-    [id, recommendation, lang === "uz" ? "uz" : "ru"]
+    `insert into navi_visits (doctor_id, ai_recommendation, ai_lang, visit_goal, visit_products, ai_sections, visual_aid_id, promo_material_id)
+     values ($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
+    [id, sections.general_recommendations || "", lang === "uz" ? "uz" : "ru", visit_goal || "", JSON.stringify(visitProducts), JSON.stringify(sections), visualAidId, promoMaterialId]
   );
   res.json(rows[0]);
 });
@@ -1141,8 +1191,22 @@ app.put("/api/navi/visits/:id", auth, requireRole("mp"), async (req, res) => {
     `select v.id, d.mp_id from navi_visits v join navi_doctors d on d.id=v.doctor_id where v.id=$1`, [id]
   );
   if (!check.rows[0] || check.rows[0].mp_id !== req.user.id) return res.status(403).json({ error: "Forbidden" });
-  const { mp_report } = req.body;
-  await pool.query("update navi_visits set mp_report=$1, reported_at=now() where id=$2", [mp_report || "", id]);
+  const { mp_report, post_visit_brands, post_visit_agreements } = req.body;
+  await pool.query(
+    "update navi_visits set mp_report=$1, post_visit_brands=$2, post_visit_agreements=$3, reported_at=now() where id=$4",
+    [mp_report || "", JSON.stringify(post_visit_brands || []), JSON.stringify(post_visit_agreements || []), id]
+  );
+  // Keep the doctor's "already prescribes" reference numbers current for next visit's auto-fill
+  const doctorRes = await pool.query("select doctor_id from navi_visits where id=$1", [id]);
+  const doctorId = doctorRes.rows[0].doctor_id;
+  for (const b of (post_visit_brands || [])) {
+    if (!b.product_id) continue;
+    await pool.query(
+      `insert into navi_doctor_products (doctor_id, product_id, prescriptions) values ($1,$2,$3)
+       on conflict (doctor_id, product_id) do update set prescriptions=excluded.prescriptions`,
+      [doctorId, b.product_id, b.monthly_qty || 0]
+    );
+  }
   res.json({ ok: true });
 });
 

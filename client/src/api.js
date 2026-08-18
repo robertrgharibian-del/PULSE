@@ -109,8 +109,8 @@ export const api = {
   getNaviDoctor: (id) => request(`/api/navi/doctors/${id}`),
   updateNaviDoctor: (id, payload) => request(`/api/navi/doctors/${id}`, { method: "PUT", body: payload }),
   deleteNaviDoctor: (id) => request(`/api/navi/doctors/${id}`, { method: "DELETE" }),
-  startNaviVisit: (id, lang) => request(`/api/navi/doctors/${id}/start-visit`, { method: "POST", body: { lang } }),
-  reportNaviVisit: (visitId, mp_report) => request(`/api/navi/visits/${visitId}`, { method: "PUT", body: { mp_report } }),
+  startNaviVisit: (id, payload) => request(`/api/navi/doctors/${id}/start-visit`, { method: "POST", body: payload }),
+  reportNaviVisit: (visitId, payload) => request(`/api/navi/visits/${visitId}`, { method: "PUT", body: payload }),
   uploadPortfolioFile: (productId, fileType, file, onProgress) => {
     const fd = new FormData();
     fd.append("file", file); fd.append("file_type", fileType);
