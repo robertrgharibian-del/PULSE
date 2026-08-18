@@ -3293,4 +3293,8 @@ const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`FSS Review server running on port ${PORT}`);
   console.log(`AI (NAVI/Аналитика): ${aiEnabled ? "включен, модель " + AI_MODEL : "ВЫКЛЮЧЕН — переменная ANTHROPIC_API_KEY не обнаружена"}`);
+  if (!aiEnabled) {
+    const related = Object.keys(process.env).filter((k) => /anthropic|api_key|claude/i.test(k));
+    console.log(`Диагностика: переменные окружения, похожие на ANTHROPIC_API_KEY, которые видит сервер: ${related.length ? JSON.stringify(related) : "ни одной — сервер вообще не получает такую переменную"}`);
+  }
 });
