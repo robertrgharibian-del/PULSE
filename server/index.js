@@ -1631,6 +1631,37 @@ app.get("/api/reports/:id", auth, async (req, res) => {
   const convSummary = buildBrandSummary(convRes.rows, "current_rx_per_week");
   const potSummary = buildBrandSummary(potRes.rows, "current_potential_per_week");
 
+  // ---- Plan vs Actual for THIS month (the plan was set last month, MP now reports the result) ----
+  function buildPlanVsActual(rows) {
+    const byProduct = {};
+    for (const r of rows) {
+      if (r.previous_target_rx_per_week === null || r.previous_target_rx_per_week === undefined) continue;
+      const pid = r.product_id;
+      if (!byProduct[pid]) byProduct[pid] = { product_id: pid, product_name: r.product_name, nrv_usd: Number(r.nrv_usd), plan_rx: 0, fact_rx: 0, doctors: 0, doctors_achieved: 0 };
+      const plan = Number(r.previous_target_rx_per_week);
+      const fact = r.actual_result_rx_per_week === null || r.actual_result_rx_per_week === undefined ? 0 : Number(r.actual_result_rx_per_week);
+      byProduct[pid].plan_rx += plan;
+      byProduct[pid].fact_rx += fact;
+      byProduct[pid].doctors += 1;
+      if (fact >= plan) byProduct[pid].doctors_achieved += 1;
+    }
+    const items = Object.values(byProduct).map((b) => ({
+      product_id: b.product_id, product_name: b.product_name,
+      plan_packs: b.plan_rx * WEEKS_PER_MONTH, fact_packs: b.fact_rx * WEEKS_PER_MONTH,
+      plan_usd: b.plan_rx * WEEKS_PER_MONTH * b.nrv_usd, fact_usd: b.fact_rx * WEEKS_PER_MONTH * b.nrv_usd,
+      achievement: b.plan_rx ? b.fact_rx / b.plan_rx : null,
+      doctors: b.doctors, doctors_achieved: b.doctors_achieved,
+    }));
+    const totals = items.reduce((s, it) => ({
+      plan_packs: s.plan_packs + it.plan_packs, fact_packs: s.fact_packs + it.fact_packs,
+      plan_usd: s.plan_usd + it.plan_usd, fact_usd: s.fact_usd + it.fact_usd,
+    }), { plan_packs: 0, fact_packs: 0, plan_usd: 0, fact_usd: 0 });
+    totals.achievement = totals.plan_usd ? totals.fact_usd / totals.plan_usd : null;
+    return { items, totals };
+  }
+  const conversionPlanVsActual = buildPlanVsActual(convRes.rows);
+  const potentialPlanVsActual = buildPlanVsActual(potRes.rows);
+
   // ---- Next-month sales forecast: base + conversion + potential + opportunities ----
   const nextMonth = report.period_month === 12 ? 1 : report.period_month + 1;
   const nextYear = report.period_month === 12 ? report.period_year + 1 : report.period_year;
@@ -1691,8 +1722,8 @@ app.get("/api/reports/:id", auth, async (req, res) => {
     ffe: { items: ffeItems, score: ffeScore, gate_passed: ffeGatePassed, gate_threshold: FFE_GATE },
     field_days: fieldDaysRes.rows[0],
     action_plan: apRes.rows,
-    conversion: { items: convRes.rows, summary: convSummary },
-    potential: { items: potRes.rows, summary: potSummary },
+    conversion: { items: convRes.rows, summary: convSummary, planVsActual: conversionPlanVsActual },
+    potential: { items: potRes.rows, summary: potSummary, planVsActual: potentialPlanVsActual },
     opportunities,
     forecast: { items: forecast, totals: forecastTotals, period_year: nextYear, period_month: nextMonth },
     comments: commentsRes.rows,
@@ -2583,9 +2614,9 @@ async function loadFullReport(rid) {
   const ffeRes = await pool.query("select * from report_ffe where report_id=$1", [rid]);
   const apRes = await pool.query("select * from report_action_plan where report_id=$1 order by sort_order,id", [rid]);
   const convRes = await pool.query(
-    `select c.*, p.name as product_name from report_conversion c join products p on p.id=c.product_id where c.report_id=$1`, [rid]);
+    `select c.*, p.name as product_name, p.nrv_usd from report_conversion c join products p on p.id=c.product_id where c.report_id=$1`, [rid]);
   const potRes = await pool.query(
-    `select c.*, p.name as product_name from report_potential c join products p on p.id=c.product_id where c.report_id=$1`, [rid]);
+    `select c.*, p.name as product_name, p.nrv_usd from report_potential c join products p on p.id=c.product_id where c.report_id=$1`, [rid]);
   const commentsRes = await pool.query(
     `select cm.*, u.full_name as author_name from report_comments cm join users u on u.id=cm.author_id where cm.report_id=$1 order by cm.created_at`, [rid]);
 
@@ -2666,6 +2697,31 @@ async function loadFullReport(rid) {
   const conversionSkuBreakdown = skuBreakdown(convPacks);
   const potentialSkuBreakdown = skuBreakdown(potPacks);
 
+  // ---- Plan vs Actual for THIS month (plan was set last month, MP now reports the result) ----
+  function buildPlanVsActualExport(rows) {
+    const byProduct = {};
+    for (const r of rows) {
+      if (r.previous_target_rx_per_week === null || r.previous_target_rx_per_week === undefined) continue;
+      const pid = r.product_id;
+      if (!byProduct[pid]) byProduct[pid] = { product_name: r.product_name, nrv_usd: Number(r.nrv_usd), plan_rx: 0, fact_rx: 0 };
+      const plan = Number(r.previous_target_rx_per_week);
+      const fact = r.actual_result_rx_per_week === null || r.actual_result_rx_per_week === undefined ? 0 : Number(r.actual_result_rx_per_week);
+      byProduct[pid].plan_rx += plan;
+      byProduct[pid].fact_rx += fact;
+    }
+    const items = Object.values(byProduct).map((b) => ({
+      product_name: b.product_name,
+      plan_packs: b.plan_rx * WEEKS_PER_MONTH_EXP, fact_packs: b.fact_rx * WEEKS_PER_MONTH_EXP,
+      plan_usd: b.plan_rx * WEEKS_PER_MONTH_EXP * b.nrv_usd, fact_usd: b.fact_rx * WEEKS_PER_MONTH_EXP * b.nrv_usd,
+      achievement: b.plan_rx ? b.fact_rx / b.plan_rx : null,
+    }));
+    const totalPlanUsd = items.reduce((s, it) => s + it.plan_usd, 0);
+    const totalFactUsd = items.reduce((s, it) => s + it.fact_usd, 0);
+    return { items, totalPlanUsd, totalFactUsd, achievement: totalPlanUsd ? totalFactUsd / totalPlanUsd : null };
+  }
+  const conversionPlanVsActual = buildPlanVsActualExport(convRes.rows);
+  const potentialPlanVsActual = buildPlanVsActualExport(potRes.rows);
+
   // ---- Marketing events & activities: plan vs actual for this report's month ----
   const activityRes = await pool.query(
     `select e.*, t.name as type_name, t.category as kind_category
@@ -2710,7 +2766,7 @@ async function loadFullReport(rid) {
     report, mp: mpRes.rows[0], rm_name: rmRes.rows[0]?.full_name || "—",
     fssItems, targetUsd, actualUsd, achievement, rawBonusUzs, bonusUzs, bonusUsd: bonusUzs / Number(report.fx_rate),
     ffeItems, ffeScore, ffeGatePassed, actionPlan: apRes.rows, conversion: convRes.rows, potential: potRes.rows,
-    conversionSkuBreakdown, potentialSkuBreakdown, activitiesSummary,
+    conversionSkuBreakdown, potentialSkuBreakdown, conversionPlanVsActual, potentialPlanVsActual, activitiesSummary,
     comments: commentsRes.rows, quarterBonus, docTracking, docTrackingGrouped,
     forecast, forecastTotalUsd, forecastTargetUsd, forecastPeriod: { year: nextYear, month: nextMonth },
     opportunities: oppRes.rows.map((o) => o.name),
@@ -2822,6 +2878,20 @@ app.get("/api/reports/:id/export/xlsx", auth, async (req, res) => {
     row.eachCell((c) => (c.border = border));
   });
   ws4.columns.forEach((c) => (c.width = 22));
+  if (data.conversionPlanVsActual.items.length > 0) {
+    ws4.addRow([]);
+    const pvaTitle = ws4.addRow(["Итоги плана конверсии за этот месяц: план (прошлый месяц) vs факт"]);
+    pvaTitle.font = titleFont;
+    styleHeaderRow(ws4.addRow(["Препарат", "План, уп.", "Факт, уп.", "План, $", "Факт, $", "Выполнение"]));
+    data.conversionPlanVsActual.items.forEach((it) => {
+      const row = ws4.addRow([it.product_name, Math.round(it.plan_packs), Math.round(it.fact_packs), Math.round(it.plan_usd), Math.round(it.fact_usd), it.achievement]);
+      row.getCell(6).numFmt = "0.0%";
+      row.eachCell((c) => (c.border = border));
+    });
+    const pvaTotal = ws4.addRow(["ИТОГО", "", "", Math.round(data.conversionPlanVsActual.totalPlanUsd), Math.round(data.conversionPlanVsActual.totalFactUsd), data.conversionPlanVsActual.achievement]);
+    pvaTotal.font = { bold: true };
+    pvaTotal.getCell(6).numFmt = "0.0%";
+  }
 
   const ws5 = wb.addWorksheet("Увеличение потенциала", { views: [{ showGridLines: false }] });
   styleHeaderRow(ws5.addRow(["Препарат", "Врач", "Специальность", "ЛПУ", "Текущий потенциал, Rx/нед", "Причина", "План МП", "Цель, Rx/нед", "Начало", "Контроль"]));
@@ -2830,6 +2900,20 @@ app.get("/api/reports/:id/export/xlsx", auth, async (req, res) => {
     row.eachCell((c) => (c.border = border));
   });
   ws5.columns.forEach((c) => (c.width = 22));
+  if (data.potentialPlanVsActual.items.length > 0) {
+    ws5.addRow([]);
+    const pvaTitle2 = ws5.addRow(["Итоги плана увеличения потенциала за этот месяц: план (прошлый месяц) vs факт"]);
+    pvaTitle2.font = titleFont;
+    styleHeaderRow(ws5.addRow(["Препарат", "План, уп.", "Факт, уп.", "План, $", "Факт, $", "Выполнение"]));
+    data.potentialPlanVsActual.items.forEach((it) => {
+      const row = ws5.addRow([it.product_name, Math.round(it.plan_packs), Math.round(it.fact_packs), Math.round(it.plan_usd), Math.round(it.fact_usd), it.achievement]);
+      row.getCell(6).numFmt = "0.0%";
+      row.eachCell((c) => (c.border = border));
+    });
+    const pvaTotal2 = ws5.addRow(["ИТОГО", "", "", Math.round(data.potentialPlanVsActual.totalPlanUsd), Math.round(data.potentialPlanVsActual.totalFactUsd), data.potentialPlanVsActual.achievement]);
+    pvaTotal2.font = { bold: true };
+    pvaTotal2.getCell(6).numFmt = "0.0%";
+  }
 
   const ws6 = wb.addWorksheet("DOC TRACKING", { views: [{ showGridLines: false }] });
   styleHeaderRow(ws6.addRow(["Врач", "Мероприятие (конференция)", "Упаковок за месяц", "Вклад, $"]));
@@ -2983,6 +3067,35 @@ app.get("/api/reports/:id/export/pptx", auth, async (req, res) => {
     : [{ text: "комментариев пока нет", options: { fontSize: 9, color: MUTED } }];
   s.addText(commentLines, { x: 6.9, y: 4.7, w: 5.9, h: 2.2, valign: "top", lineSpacingMultiple: 1.25 });
 
+  // ---- Slide 4b: Конверсия — план/факт текущего месяца ----
+  if (data.conversionPlanVsActual.items.length > 0) {
+    s = pptx.addSlide(); chrome(s, "Конверсия — итоги плана за этот месяц");
+    const pvaRows = [[
+      { text: "Препарат (SKU)", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+      { text: "План, уп.", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+      { text: "Факт, уп.", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+      { text: "План, $", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+      { text: "Факт, $", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+      { text: "Выполнение", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+    ]];
+    data.conversionPlanVsActual.items.forEach((it) => pvaRows.push([
+      { text: it.product_name, options: { color: INK } },
+      { text: String(Math.round(it.plan_packs)), options: { color: MUTED, align: "right" } },
+      { text: String(Math.round(it.fact_packs)), options: { color: INK, align: "right" } },
+      { text: `$${Math.round(it.plan_usd).toLocaleString()}`, options: { color: MUTED, align: "right" } },
+      { text: `$${Math.round(it.fact_usd).toLocaleString()}`, options: { color: INK, align: "right" } },
+      { text: it.achievement != null ? `${(it.achievement * 100).toFixed(0)}%` : "—", options: { color: achColor(it.achievement), bold: true, align: "right" } },
+    ]));
+    pvaRows.push([
+      { text: "ИТОГО", options: { bold: true, fill: { color: PANEL } } },
+      { text: "", options: { fill: { color: PANEL } } }, { text: "", options: { fill: { color: PANEL } } },
+      { text: `$${Math.round(data.conversionPlanVsActual.totalPlanUsd).toLocaleString()}`, options: { bold: true, align: "right", fill: { color: PANEL } } },
+      { text: `$${Math.round(data.conversionPlanVsActual.totalFactUsd).toLocaleString()}`, options: { bold: true, align: "right", fill: { color: PANEL } } },
+      { text: data.conversionPlanVsActual.achievement != null ? `${(data.conversionPlanVsActual.achievement * 100).toFixed(0)}%` : "—", options: { bold: true, color: achColor(data.conversionPlanVsActual.achievement), align: "right", fill: { color: PANEL } } },
+    ]);
+    s.addTable(pvaRows, { x: 0.5, y: 1.0, w: 12.3, fontSize: 11, border: { color: LINE, pt: 0.5 }, autoPage: false });
+  }
+
   // ---- Slide 5: Конверсия — по отдельным SKU, упаковки + $ + итог ----
   if (data.conversionSkuBreakdown.rows.length > 0) {
     s = pptx.addSlide(); chrome(s, "План конверсии врачей — по SKU");
@@ -3005,6 +3118,35 @@ app.get("/api/reports/:id/export/pptx", auth, async (req, res) => {
     s.addShape(pptx.ShapeType.rect, { x: 9.3, y: 1.5, w: 3.5, h: 1.6, fill: { color: PANEL }, line: { color: LINE } });
     s.addText("ДОПОЛНИТЕЛЬНЫЙ БИЗНЕС ЗА МЕСЯЦ", { x: 9.5, y: 1.65, w: 3.1, fontSize: 9, color: MUTED });
     s.addText(`$${Math.round(data.conversionSkuBreakdown.totalUsd).toLocaleString()}`, { x: 9.5, y: 2.0, fontSize: 22, bold: true, color: GOLD });
+  }
+
+  // ---- Slide 5b: Потенциал — план/факт текущего месяца ----
+  if (data.potentialPlanVsActual.items.length > 0) {
+    s = pptx.addSlide(); chrome(s, "Увеличение потенциала — итоги плана за этот месяц");
+    const pvaRows2 = [[
+      { text: "Препарат (SKU)", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+      { text: "План, уп.", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+      { text: "Факт, уп.", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+      { text: "План, $", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+      { text: "Факт, $", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+      { text: "Выполнение", options: { bold: true, fill: { color: INK }, color: "FFFFFF" } },
+    ]];
+    data.potentialPlanVsActual.items.forEach((it) => pvaRows2.push([
+      { text: it.product_name, options: { color: INK } },
+      { text: String(Math.round(it.plan_packs)), options: { color: MUTED, align: "right" } },
+      { text: String(Math.round(it.fact_packs)), options: { color: INK, align: "right" } },
+      { text: `$${Math.round(it.plan_usd).toLocaleString()}`, options: { color: MUTED, align: "right" } },
+      { text: `$${Math.round(it.fact_usd).toLocaleString()}`, options: { color: INK, align: "right" } },
+      { text: it.achievement != null ? `${(it.achievement * 100).toFixed(0)}%` : "—", options: { color: achColor(it.achievement), bold: true, align: "right" } },
+    ]));
+    pvaRows2.push([
+      { text: "ИТОГО", options: { bold: true, fill: { color: PANEL } } },
+      { text: "", options: { fill: { color: PANEL } } }, { text: "", options: { fill: { color: PANEL } } },
+      { text: `$${Math.round(data.potentialPlanVsActual.totalPlanUsd).toLocaleString()}`, options: { bold: true, align: "right", fill: { color: PANEL } } },
+      { text: `$${Math.round(data.potentialPlanVsActual.totalFactUsd).toLocaleString()}`, options: { bold: true, align: "right", fill: { color: PANEL } } },
+      { text: data.potentialPlanVsActual.achievement != null ? `${(data.potentialPlanVsActual.achievement * 100).toFixed(0)}%` : "—", options: { bold: true, color: achColor(data.potentialPlanVsActual.achievement), align: "right", fill: { color: PANEL } } },
+    ]);
+    s.addTable(pvaRows2, { x: 0.5, y: 1.0, w: 12.3, fontSize: 11, border: { color: LINE, pt: 0.5 }, autoPage: false });
   }
 
   // ---- Slide 6: Потенциал — по отдельным SKU, упаковки + $ + итог ----

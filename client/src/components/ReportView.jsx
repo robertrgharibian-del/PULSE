@@ -674,6 +674,39 @@ export default function ReportView({ reportId, user, onBack }) {
             </div>
           )}
 
+          {detail.conversion.planVsActual.items.length > 0 && (
+            <div className="mb-6">
+              <div className="text-sm font-semibold mb-2" style={{ color: "#374151" }}>Итоги плана конверсии за этот месяц: план (задан в прошлом месяце) vs факт</div>
+              <table className="w-full text-sm mb-3">
+                <thead><tr style={{ color: "#6B7280", fontSize: 11 }} className="uppercase">
+                  <th className="text-left py-1">Препарат</th>
+                  <th className="text-right px-2">Врачей</th>
+                  <th className="text-right px-2">План, уп.</th><th className="text-right px-2">Факт, уп.</th>
+                  <th className="text-right px-2">План, $</th><th className="text-right px-2">Факт, $</th>
+                  <th className="text-right">Выполнение</th>
+                </tr></thead>
+                <tbody>
+                  {detail.conversion.planVsActual.items.map((s) => (
+                    <tr key={s.product_id} style={{ borderTop: "1px solid #E4E7F0" }}>
+                      <td className="py-1.5">{s.product_name}</td>
+                      <td className="text-right px-2 font-mono" style={{ color: "#6B7280" }}>{s.doctors_achieved}/{s.doctors}</td>
+                      <td className="text-right px-2 font-mono" style={{ color: "#6B7280" }}>{Math.round(s.plan_packs).toLocaleString()}</td>
+                      <td className="text-right px-2 font-mono">{Math.round(s.fact_packs).toLocaleString()}</td>
+                      <td className="text-right px-2 font-mono" style={{ color: "#6B7280" }}>{Math.round(s.plan_usd).toLocaleString()}</td>
+                      <td className="text-right px-2 font-mono">{Math.round(s.fact_usd).toLocaleString()}</td>
+                      <td className="text-right font-mono font-semibold" style={{ color: achColor(s.achievement) }}>{s.achievement != null ? `${(s.achievement * 100).toFixed(0)}%` : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="flex flex-wrap items-center gap-4 rounded-lg p-3 text-sm" style={{ background: "#EEF1F8" }}>
+                <div><span style={{ color: "#6B7280" }}>Итого план:</span> <b className="font-mono">${Math.round(detail.conversion.planVsActual.totals.plan_usd).toLocaleString()}</b></div>
+                <div><span style={{ color: "#6B7280" }}>Итого факт:</span> <b className="font-mono">${Math.round(detail.conversion.planVsActual.totals.fact_usd).toLocaleString()}</b></div>
+                <div><span style={{ color: "#6B7280" }}>Выполнение:</span> <b className="font-mono" style={{ color: achColor(detail.conversion.planVsActual.totals.achievement) }}>{detail.conversion.planVsActual.totals.achievement != null ? `${(detail.conversion.planVsActual.totals.achievement * 100).toFixed(1)}%` : "—"}</b></div>
+              </div>
+            </div>
+          )}
+
           {detail.conversion.summary.length > 0 && (
             <div>
               <div className="text-sm font-semibold mb-2" style={{ color: "#374151" }}>Прогноз по брендам: база + конверсия</div>
@@ -832,6 +865,39 @@ export default function ReportView({ reportId, user, onBack }) {
               <button onClick={() => { setPotRows((r) => [...r, { product_id: "", doctor_name: "", doctor_specialty: "", lpu_name: "", current_potential_per_week: "", reason_not_treating: "", mp_action_plan: "", target_rx_per_week: "", start_date: "", control_date: "" }]); setPotLocked(false); }}
                 className="px-3 py-2 rounded text-sm" style={{ background: "#E4E7F0" }}>+ добавить врача</button>
               {!potLocked && <button onClick={async () => { await savePotential(); setPotLocked(true); }} disabled={busy} className="px-4 py-2 rounded font-semibold" style={{ background: "#16A34A", color: "#FFFFFF" }}>Сохранить Потенциал</button>}
+            </div>
+          )}
+
+          {detail.potential.planVsActual.items.length > 0 && (
+            <div className="mb-6">
+              <div className="text-sm font-semibold mb-2" style={{ color: "#374151" }}>Итоги плана увеличения потенциала за этот месяц: план (задан в прошлом месяце) vs факт</div>
+              <table className="w-full text-sm mb-3">
+                <thead><tr style={{ color: "#6B7280", fontSize: 11 }} className="uppercase">
+                  <th className="text-left py-1">Препарат</th>
+                  <th className="text-right px-2">Врачей</th>
+                  <th className="text-right px-2">План, уп.</th><th className="text-right px-2">Факт, уп.</th>
+                  <th className="text-right px-2">План, $</th><th className="text-right px-2">Факт, $</th>
+                  <th className="text-right">Выполнение</th>
+                </tr></thead>
+                <tbody>
+                  {detail.potential.planVsActual.items.map((s) => (
+                    <tr key={s.product_id} style={{ borderTop: "1px solid #E4E7F0" }}>
+                      <td className="py-1.5">{s.product_name}</td>
+                      <td className="text-right px-2 font-mono" style={{ color: "#6B7280" }}>{s.doctors_achieved}/{s.doctors}</td>
+                      <td className="text-right px-2 font-mono" style={{ color: "#6B7280" }}>{Math.round(s.plan_packs).toLocaleString()}</td>
+                      <td className="text-right px-2 font-mono">{Math.round(s.fact_packs).toLocaleString()}</td>
+                      <td className="text-right px-2 font-mono" style={{ color: "#6B7280" }}>{Math.round(s.plan_usd).toLocaleString()}</td>
+                      <td className="text-right px-2 font-mono">{Math.round(s.fact_usd).toLocaleString()}</td>
+                      <td className="text-right font-mono font-semibold" style={{ color: achColor(s.achievement) }}>{s.achievement != null ? `${(s.achievement * 100).toFixed(0)}%` : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="flex flex-wrap items-center gap-4 rounded-lg p-3 text-sm" style={{ background: "#EEF1F8" }}>
+                <div><span style={{ color: "#6B7280" }}>Итого план:</span> <b className="font-mono">${Math.round(detail.potential.planVsActual.totals.plan_usd).toLocaleString()}</b></div>
+                <div><span style={{ color: "#6B7280" }}>Итого факт:</span> <b className="font-mono">${Math.round(detail.potential.planVsActual.totals.fact_usd).toLocaleString()}</b></div>
+                <div><span style={{ color: "#6B7280" }}>Выполнение:</span> <b className="font-mono" style={{ color: achColor(detail.potential.planVsActual.totals.achievement) }}>{detail.potential.planVsActual.totals.achievement != null ? `${(detail.potential.planVsActual.totals.achievement * 100).toFixed(1)}%` : "—"}</b></div>
+              </div>
             </div>
           )}
 

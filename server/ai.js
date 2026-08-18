@@ -2,7 +2,7 @@
 // server-side. Requires ANTHROPIC_API_KEY to be set (see .env.example);
 // no end user needs to install or configure anything.
 
-const AI_MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-4-5-20250929";
+const AI_MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-5";
 const aiEnabled = !!process.env.ANTHROPIC_API_KEY;
 
 function quarterOf(month) { return Math.floor((month - 1) / 3) + 1; }
