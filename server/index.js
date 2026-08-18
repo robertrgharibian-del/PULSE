@@ -2612,21 +2612,23 @@ const AI_CACHE_HOURS = 24;
 app.get("/api/ai-insights", auth, async (req, res) => {
   if (!aiEnabled) return res.status(503).json({ error: "ИИ-анализ не настроен на сервере (нет ANTHROPIC_API_KEY)" });
   const refresh = req.query.refresh === "true";
-  let scope, scopeId, mpIds, label;
+  let scope, scopeId, mpIds, rmIds, label;
 
   if (req.user.role === "mp") {
-    scope = "mp"; scopeId = req.user.id; mpIds = [req.user.id];
+    scope = "mp"; scopeId = req.user.id; mpIds = [req.user.id]; rmIds = [];
     const u = await pool.query("select full_name from users where id=$1", [req.user.id]);
     label = `МП ${u.rows[0]?.full_name || ""}`;
   } else if (req.user.role === "rm") {
     scope = "rm"; scopeId = req.user.id;
     const team = await pool.query("select id from users where rm_id=$1 and role='mp'", [req.user.id]);
-    mpIds = team.rows.map((r) => r.id);
+    mpIds = team.rows.map((r) => r.id); rmIds = [];
     label = "Команда РМ";
   } else if (req.user.role === "master") {
     scope = "master"; scopeId = null;
     const all = await pool.query("select id from users where role='mp'");
     mpIds = all.rows.map((r) => r.id);
+    const allRms = await pool.query("select id from users where role='rm'");
+    rmIds = allRms.rows.map((r) => r.id);
     label = "Вся компания";
   } else {
     return res.status(403).json({ error: "Forbidden" });
@@ -2643,9 +2645,9 @@ app.get("/api/ai-insights", auth, async (req, res) => {
     }
   }
 
-  const context = await buildAnalyticsContext(pool, { mpIds, label });
+  const context = await buildAnalyticsContext(pool, { mpIds, label, scope, rmIds });
   if (!context || context.months.length === 0) {
-    return res.json({ summary: "Недостаточно данных для анализа — нет ни одного одобренного отчёта.", monthly_dynamics: "", quarterly_dynamics: "", yearly_dynamics: "", risks: [], short_term_recommendations: [], long_term_recommendations: [], generated_at: new Date(), cached: false });
+    return res.json({ summary: "Недостаточно данных для анализа — нет ни одного одобренного отчёта.", monthly_dynamics: "", quarterly_dynamics: "", yearly_dynamics: "", conversion_potential_analysis: "", navi_analysis: "", risks: [], short_term_recommendations: [], long_term_recommendations: [], team_analysis: [], employee_recommendations: [], business_recommendations: null, chart_data: null, generated_at: new Date(), cached: false });
   }
 
   let content;
@@ -2656,11 +2658,15 @@ app.get("/api/ai-insights", auth, async (req, res) => {
     return res.status(502).json({ error: "Не удалось получить анализ от ИИ. Попробуйте позже." });
   }
 
+  // Real, non-hallucinated numbers for charts — computed server-side, not from the AI's text
+  const chart_data = { months: context.months, quarterly: context.quarterly, yearly: context.yearly, per_mp: context.per_mp, per_rm: context.per_rm };
+  const fullContent = { ...content, chart_data };
+
   await pool.query(
     "insert into ai_insights (scope, scope_id, content, model) values ($1,$2,$3,$4)",
-    [scope, scopeId, content, AI_MODEL]
+    [scope, scopeId, fullContent, AI_MODEL]
   );
-  res.json({ ...content, generated_at: new Date(), cached: false });
+  res.json({ ...fullContent, generated_at: new Date(), cached: false });
 });
 
 /* ============================================================

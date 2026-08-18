@@ -12,11 +12,11 @@ function quarterOf(month) { return Math.floor((month - 1) / 3) + 1; }
  * aggregated totals plus per-MP breakdown, ready to hand to the model as
  * structured context (no raw DB rows).
  */
-async function buildAnalyticsContext(pool, { mpIds, label }) {
+async function buildAnalyticsContext(pool, { mpIds, label, scope, rmIds }) {
   if (mpIds.length === 0) return null;
 
   const reportsRes = await pool.query(
-    `select r.id, r.mp_id, r.period_year, r.period_month, r.status, u.full_name as mp_name, u.territory
+    `select r.id, r.mp_id, r.period_year, r.period_month, r.status, u.full_name as mp_name, u.territory, u.rm_id
      from reports r join users u on u.id = r.mp_id
      where r.mp_id = any($1::bigint[]) and r.status = 'approved'
      order by r.period_year, r.period_month`,
@@ -41,6 +41,25 @@ async function buildAnalyticsContext(pool, { mpIds, label }) {
      where report_id = any($1::bigint[]) and section='fss' order by created_at desc limit 60`,
     [reportIds]
   );
+  // Conversion / Potential: previous month's plan vs this month's reported actual
+  const convRes = await pool.query(
+    `select report_id, previous_target_rx_per_week, actual_result_rx_per_week from report_conversion
+     where report_id = any($1::bigint[]) and previous_target_rx_per_week is not null`,
+    [reportIds]
+  );
+  const potRes = await pool.query(
+    `select report_id, previous_target_rx_per_week, actual_result_rx_per_week from report_potential
+     where report_id = any($1::bigint[]) and previous_target_rx_per_week is not null`,
+    [reportIds]
+  );
+  // NAVI: doctor coaching workload + how many coached visits translated into a reported increase
+  const naviRes = await pool.query(
+    `select v.id, v.doctor_id, v.mp_report, v.post_visit_brands, v.reported_at
+     from navi_visits v join navi_doctors d on d.id=v.doctor_id
+     where d.mp_id = any($1::bigint[])`,
+    [mpIds]
+  );
+  const naviDoctorsRes = await pool.query("select count(*) as n from navi_doctors where mp_id = any($1::bigint[])", [mpIds]);
 
   const fssByReport = {};
   for (const row of fssRes.rows) {
@@ -81,7 +100,7 @@ async function buildAnalyticsContext(pool, { mpIds, label }) {
       monthly[key].byProduct[name] = (monthly[key].byProduct[name] || 0) + usd;
     }
 
-    (perMp[r.mp_id] ||= { name: r.mp_name, territory: r.territory, months: [] }).months.push({
+    (perMp[r.mp_id] ||= { name: r.mp_name, territory: r.territory, rm_id: r.rm_id, months: [] }).months.push({
       year: r.period_year, month: r.period_month, target_usd, actual_usd,
       achievement: target_usd ? actual_usd / target_usd : null,
     });
@@ -118,10 +137,74 @@ async function buildAnalyticsContext(pool, { mpIds, label }) {
     achievement_pct: v.target_usd ? Math.round((v.actual_usd / v.target_usd) * 1000) / 10 : null,
   }));
 
+  const reportIdToMpId = Object.fromEntries(reports.map((r) => [r.id, r.mp_id]));
+
+  function convPotSummary(rows) {
+    let planSum = 0, factSum = 0, reportedCount = 0, totalCount = 0;
+    const byMp = {};
+    for (const row of rows) {
+      const plan = Number(row.previous_target_rx_per_week);
+      const hasFact = row.actual_result_rx_per_week !== null && row.actual_result_rx_per_week !== undefined;
+      const fact = hasFact ? Number(row.actual_result_rx_per_week) : 0;
+      planSum += plan; factSum += fact; totalCount += 1;
+      if (hasFact) reportedCount += 1;
+      const mpId = reportIdToMpId[row.report_id];
+      if (mpId) {
+        byMp[mpId] ||= { plan: 0, fact: 0 };
+        byMp[mpId].plan += plan; byMp[mpId].fact += fact;
+      }
+    }
+    return {
+      achievement_pct: planSum ? Math.round((factSum / planSum) * 1000) / 10 : null,
+      doctors_with_plan: totalCount, doctors_reported: reportedCount,
+      byMp,
+    };
+  }
+  const conversionSummary = convPotSummary(convRes.rows);
+  const potentialSummary = convPotSummary(potRes.rows);
+
+  const naviCompletedVisits = naviRes.rows.filter((v) => v.reported_at);
+  const naviSuccessfulVisits = naviCompletedVisits.filter((v) => Array.isArray(v.post_visit_brands) && v.post_visit_brands.some((b) => Number(b.monthly_qty) > 0));
+  const naviSummary = {
+    doctors_tracked: Number(naviDoctorsRes.rows[0]?.n || 0),
+    visits_started: naviRes.rows.length,
+    visits_completed: naviCompletedVisits.length,
+    visits_with_positive_result: naviSuccessfulVisits.length,
+    sample_outcomes: naviCompletedVisits.slice(0, 15).map((v) => v.mp_report).filter(Boolean),
+  };
+
   const perMpOut = Object.values(perMp).map((mp) => {
     const last = mp.months[mp.months.length - 1];
-    return { name: mp.name, territory: mp.territory, latest_achievement_pct: last?.achievement != null ? Math.round(last.achievement * 1000) / 10 : null, months_reported: mp.months.length };
+    const avgAchievement = mp.months.filter((m) => m.achievement !== null).reduce((s, m, _, arr) => s + m.achievement / arr.length, 0);
+    return {
+      name: mp.name, territory: mp.territory,
+      latest_achievement_pct: last?.achievement != null ? Math.round(last.achievement * 1000) / 10 : null,
+      avg_achievement_pct: mp.months.length ? Math.round(avgAchievement * 1000) / 10 : null,
+      months_reported: mp.months.length,
+    };
   }).sort((a, b) => (a.latest_achievement_pct ?? 0) - (b.latest_achievement_pct ?? 0));
+
+  // Per-RM rollup (only meaningful for the master/whole-company scope)
+  let perRmOut = [];
+  if (scope === "master") {
+    const byRm = {};
+    for (const mp of Object.values(perMp)) {
+      if (!mp.rm_id) continue;
+      byRm[mp.rm_id] ||= { mp_count: 0, achievements: [] };
+      byRm[mp.rm_id].mp_count += 1;
+      const last = mp.months[mp.months.length - 1];
+      if (last?.achievement != null) byRm[mp.rm_id].achievements.push(last.achievement);
+    }
+    if (Object.keys(byRm).length && rmIds?.length) {
+      const rmNamesRes = await pool.query("select id, full_name, territory from users where id = any($1::bigint[])", [rmIds]);
+      const rmNameById = Object.fromEntries(rmNamesRes.rows.map((r) => [r.id, { name: r.full_name, territory: r.territory }]));
+      perRmOut = Object.entries(byRm).map(([rmId, v]) => ({
+        name: rmNameById[rmId]?.name || `РМ #${rmId}`, territory: rmNameById[rmId]?.territory,
+        mp_count: v.mp_count,
+        team_avg_achievement_pct: v.achievements.length ? Math.round((v.achievements.reduce((s, x) => s + x, 0) / v.achievements.length) * 1000) / 10 : null,
+      }));
+    }
+  }
 
   return {
     label,
@@ -129,6 +212,10 @@ async function buildAnalyticsContext(pool, { mpIds, label }) {
     quarterly: quarterlyOut,
     yearly: yearlyOut,
     per_mp: perMpOut,
+    per_rm: perRmOut,
+    conversion_summary: conversionSummary,
+    potential_summary: potentialSummary,
+    navi_summary: naviSummary,
     underperformance_notes: notesRes.rows.map((n) => n.comment_text).slice(0, 20),
   };
 }
@@ -136,20 +223,30 @@ async function buildAnalyticsContext(pool, { mpIds, label }) {
 const NO_DASH_RULE = "Никогда не используй длинное тире (—) или короткое тире (–) — только обычный дефис (-) или перестрой предложение. Не используй markdown-разметку.";
 
 async function callClaude(context) {
+  const hasTeam = (context.per_mp && context.per_mp.length > 0) || (context.per_rm && context.per_rm.length > 0);
   const system = `Ты — senior аналитик фармацевтических продаж (field force effectiveness) для команды медпредставителей в Узбекистане.
-Тебе дают структурированные данные по вторичным продажам (FSS): план/факт по месяцам, кварталам, годам, в долларах, плюс FFE score, плюс комментарии медпредов о причинах невыполнения.
-Дай ГЛУБОКИЙ анализ: тренды месяц-к-месяцу, квартал-к-кварталу, год-к-году, аномалии, риски, сильные и слабые препараты/территории.
+Тебе дают структурированные данные: план/факт продаж (FSS) по месяцам/кварталам/годам в долларах, FFE score, комментарии медпредов о причинах невыполнения,
+сводку по работе с Конверсией врачей (сколько было запланировано и сколько реально достигнуто), сводку по работе с Увеличением потенциала (аналогично),
+сводку по работе NAVI с "трудными" врачами (сколько врачей под наблюдением, сколько визитов проведено, сколько дали положительный результат)${hasTeam ? ", и разбивку по каждому сотруднику (медпредставителю" + (context.per_rm?.length ? " и региональному менеджеру" : "") + ")" : ""}.
+Дай ГЛУБОКИЙ, полный, ничем не ограниченный по длине анализ: тренды месяц-к-месяцу, квартал-к-кварталу, год-к-году, аномалии, риски, сильные и слабые препараты/территории,
+качество работы по конверсии и увеличению потенциала, эффективность работы NAVI с трудными врачами.
 ${NO_DASH_RULE}
 Отвечай СТРОГО в формате JSON (без markdown-разметки, без \`\`\`), на русском языке, со следующей структурой:
 {
-  "summary": "2-4 предложения — главный вывод",
-  "monthly_dynamics": "анализ динамики месяц-к-месяцу",
-  "quarterly_dynamics": "анализ динамики квартал-к-кварталу",
+  "summary": "3-5 предложений — главный вывод",
+  "monthly_dynamics": "подробный анализ динамики месяц-к-месяцу",
+  "quarterly_dynamics": "подробный анализ динамики квартал-к-кварталу",
   "yearly_dynamics": "анализ динамики год-к-году (если данных недостаточно — так и напиши)",
+  "conversion_potential_analysis": "анализ качества работы по Конверсии врачей и по Увеличению потенциала: выполняются ли планы, где проблемы",
+  "navi_analysis": "анализ работы с трудными врачами через NAVI: масштаб охвата, результативность визитов",
   "risks": ["риск 1", "риск 2", ...],
   "short_term_recommendations": ["конкретная рекомендация на 1-4 недели", ...],
-  "long_term_recommendations": ["стратегическая рекомендация на квартал+", ...]
-}`;
+  "long_term_recommendations": ["стратегическая рекомендация на квартал+", ...]${hasTeam ? `,
+  "team_analysis": [ { "name": "имя сотрудника", "role": "МП или РМ", "assessment": "оценка эффективности и продуктивности этого сотрудника: 3-5 предложений, с конкретными цифрами из данных" }, ... — по каждому сотруднику из per_mp и per_rm ],
+  "employee_recommendations": [ { "name": "имя сотрудника", "role": "МП или РМ", "monthly": "рекомендация на месяц", "quarterly": "рекомендация на квартал", "yearly": "рекомендация на год" }, ... — по каждому сотруднику ],
+  "business_recommendations": { "monthly": "общая рекомендация по бизнесу на месяц", "quarterly": "на квартал", "yearly": "на год" }` : ""}
+}
+Отвечай по существу, с конкретными цифрами из переданных данных, без общих фраз. Не сокращай и не обрывай ответ — раскрывай каждый пункт полностью.`;
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -160,7 +257,7 @@ ${NO_DASH_RULE}
     },
     body: JSON.stringify({
       model: AI_MODEL,
-      max_tokens: 2000,
+      max_tokens: 8000,
       system,
       messages: [{ role: "user", content: JSON.stringify(context) }],
     }),
@@ -170,11 +267,20 @@ ${NO_DASH_RULE}
     throw new Error(`Anthropic API error ${res.status}: ${text.slice(0, 300)}`);
   }
   const data = await res.json();
+  const stopReason = data.stop_reason;
   const text = (data.content || []).map((b) => b.text || "").join("");
   try {
-    return JSON.parse(text);
+    const parsed = JSON.parse(text);
+    if (stopReason === "max_tokens") parsed._truncated = true;
+    return parsed;
   } catch (e) {
-    return { summary: text, monthly_dynamics: "", quarterly_dynamics: "", yearly_dynamics: "", risks: [], short_term_recommendations: [], long_term_recommendations: [] };
+    console.error("AI insights: failed to parse JSON response (stop_reason=" + stopReason + "):", e.message);
+    return {
+      summary: "Анализ не удалось полностью разобрать (возможно, ответ был обрезан). Нажмите «Обновить анализ», чтобы попробовать снова.",
+      monthly_dynamics: "", quarterly_dynamics: "", yearly_dynamics: "", conversion_potential_analysis: "", navi_analysis: "",
+      risks: [], short_term_recommendations: [], long_term_recommendations: [], team_analysis: [], employee_recommendations: [], business_recommendations: null,
+      _parse_error: true, _raw_preview: text.slice(0, 500),
+    };
   }
 }
 
