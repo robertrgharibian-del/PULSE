@@ -1172,10 +1172,12 @@ app.post("/api/navi/doctors/:id/start-visit", auth, requireRole("mp"), async (re
   }
 
   // Guard: only accept material ids that were actually offered to the model
-  const validVaIds = new Set(availableVisualAids.map((v) => v.id));
-  const validPmIds = new Set(availablePromoMaterials.map((v) => v.id));
-  const visualAidId = validVaIds.has(sections.visual_aid_id) ? sections.visual_aid_id : null;
-  const promoMaterialId = validPmIds.has(sections.promo_material_id) ? sections.promo_material_id : null;
+  const validVaIds = new Set(availableVisualAids.map((v) => Number(v.id)));
+  const validPmIds = new Set(availablePromoMaterials.map((v) => Number(v.id)));
+  const aiVaId = sections.visual_aid_id != null ? Number(sections.visual_aid_id) : null;
+  const aiPmId = sections.promo_material_id != null ? Number(sections.promo_material_id) : null;
+  const visualAidId = aiVaId !== null && validVaIds.has(aiVaId) ? aiVaId : null;
+  const promoMaterialId = aiPmId !== null && validPmIds.has(aiPmId) ? aiPmId : null;
 
   const { rows } = await pool.query(
     `insert into navi_visits (doctor_id, ai_recommendation, ai_lang, visit_goal, visit_products, ai_sections, visual_aid_id, promo_material_id)

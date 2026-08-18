@@ -124,8 +124,8 @@ function MaterialRecommendation({ title, imageUrl, isPdf, script, t }) {
   );
 }
 
-function VisitCard({ visit, canEdit, portfolioProducts, onReported, t }) {
-  const [showAi, setShowAi] = useState(false);
+function VisitCard({ visit, canEdit, portfolioProducts, onReported, t, isLatest }) {
+  const [showAi, setShowAi] = useState(!!isLatest);
   const [editing, setEditing] = useState(!visit.mp_report && canEdit);
   const [report, setReport] = useState(visit.mp_report || "");
   const [brands, setBrands] = useState(visit.post_visit_brands && visit.post_visit_brands.length ? visit.post_visit_brands : []);
@@ -308,7 +308,7 @@ export default function NaviDoctorDetail({ doctorId, user, onBack }) {
       {error && <div className="text-sm mb-4" style={{ color: "#DC2626" }}>{error}</div>}
 
       <div className="font-display text-lg mb-3">{t("navi.visit_history")}</div>
-      {data.visits.map((v) => <VisitCard key={v.id} visit={v} canEdit={canEdit} portfolioProducts={portfolioProducts} onReported={load} t={t} />)}
+      {data.visits.map((v, idx) => <VisitCard key={v.id} visit={v} canEdit={canEdit} portfolioProducts={portfolioProducts} onReported={load} t={t} isLatest={idx === 0} />)}
       {data.visits.length === 0 && <div className="text-sm" style={{ color: "#6B7280" }}>{t("navi.no_visits")}</div>}
     </div>
   );
