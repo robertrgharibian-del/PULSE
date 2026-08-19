@@ -2751,6 +2751,7 @@ async function loadAiInsightsForExport(req, res) {
 app.get("/api/ai-insights/export.xlsx", auth, async (req, res) => {
   const data = await loadAiInsightsForExport(req, res);
   if (!data) return;
+  try {
 
   const NAVY = "FF3E4095", GOLD = "FFED3237", GREEN = "FFC6EFCE", GREENFONT = "FF1B5E20", RED = "FFFDE0DF", REDFONT = "FFB71C1C";
   const headerFill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
@@ -2878,11 +2879,17 @@ app.get("/api/ai-insights/export.xlsx", auth, async (req, res) => {
   res.setHeader("Content-Disposition", `attachment; filename="analytics.xlsx"`);
   await wb.xlsx.write(res);
   res.end();
+  } catch (e) {
+    console.error("Analytics xlsx export failed:", e.message, e.stack);
+    if (!res.headersSent) res.status(500).json({ error: "Ошибка при формировании Excel: " + e.message });
+    else res.end();
+  }
 });
 
 app.get("/api/ai-insights/export.pptx", auth, async (req, res) => {
   const data = await loadAiInsightsForExport(req, res);
   if (!data) return;
+  try {
 
   const pptx = new PptxGenJS();
   pptx.defineLayout({ name: "WIDE", width: 13.33, height: 7.5 });
@@ -2995,6 +3002,11 @@ app.get("/api/ai-insights/export.pptx", auth, async (req, res) => {
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation");
   res.setHeader("Content-Disposition", `attachment; filename="analytics.pptx"`);
   res.end(buffer);
+  } catch (e) {
+    console.error("Analytics pptx export failed:", e.message, e.stack);
+    if (!res.headersSent) res.status(500).json({ error: "Ошибка при формировании PPTX: " + e.message });
+    else res.end();
+  }
 });
 
 /* ============================================================

@@ -184,7 +184,7 @@ alter table reports add column if not exists underperformance_note text;
 -- migration 005 (kept in sync here for fresh installs — see migration_005.sql for existing DBs)
 create table if not exists ai_insights (
   id          bigserial primary key,
-  scope       text not null check (scope in ('mp','rm','master')),
+  scope       text not null check (scope in ('mp','rm','bm','master','mp_drilldown','rm_drilldown')),
   scope_id    bigint,
   content     jsonb not null,
   model       text,
