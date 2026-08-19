@@ -391,40 +391,30 @@ ${NO_DASH_RULE}
   "promo_material_id": <id материала из списка available_promo_materials, который лучше всего использовать, или null>,
   "promo_material_script": "если promo_material_id указан: что именно из этого материала и как озвучить врачу; иначе пустая строка"
 }
-Выбирай visual_aid_id и promo_material_id ТОЛЬКО из id, реально присутствующих в переданных списках available_visual_aids/available_promo_materials. Если списки пустые — оба поля null.`;
+Выбирай visual_aid_id и promo_material_id ТОЛЬКО из id, реально присутствующих в переданных списках available_visual_aids/available_promo_materials. Если списки пустые — оба поля null.
+ВАЖНО: каждое текстовое поле — строго не более 400 символов. Это жёсткое ограничение, чтобы ответ гарантированно уместился целиком. Короткий полный ответ важнее длинного оборванного.`;
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: AI_MODEL,
-      max_tokens: 2500,
-      system,
-      messages: [{ role: "user", content: JSON.stringify(context) }],
-    }),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Anthropic API error ${res.status}: ${text.slice(0, 300)}`);
-  }
-  const data = await res.json();
-  const text = (data.content || []).map((b) => b.text || "").join("").trim();
-  try {
-    const parsed = JSON.parse(text);
-    return {
+  const { parsed, stopReason, rawText } = await callAnthropic(system, context, 4000);
+  if (parsed) {
+    const result = {
       prior_analysis: parsed.prior_analysis || "", general_recommendations: parsed.general_recommendations || "",
       technique: parsed.technique || "", what_to_say: parsed.what_to_say || "", what_to_avoid: parsed.what_to_avoid || "",
       must_not_do: parsed.must_not_do || "", timing: parsed.timing || "", closing: parsed.closing || "",
       visual_aid_id: parsed.visual_aid_id || null, visual_aid_script: parsed.visual_aid_script || "",
       promo_material_id: parsed.promo_material_id || null, promo_material_script: parsed.promo_material_script || "",
     };
-  } catch (e) {
-    return { prior_analysis: text, general_recommendations: "", technique: "", what_to_say: "", what_to_avoid: "", must_not_do: "", timing: "", closing: "", visual_aid_id: null, visual_aid_script: "", promo_material_id: null, promo_material_script: "" };
+    if (stopReason === "max_tokens") result._truncated = true;
+    return result;
   }
+  console.error(`NAVI: JSON parse failed (stop_reason=${stopReason}, length=${rawText.length})`);
+  // Salvage whatever fields DID complete before the cutoff — never dump raw JSON text into a field
+  const salvaged = salvageStringFields(rawText, ["prior_analysis", "general_recommendations", "technique", "what_to_say", "what_to_avoid", "must_not_do", "timing", "closing"]);
+  return {
+    prior_analysis: salvaged.prior_analysis || (lang === "uz" ? "Javob to'liq kelmadi (uzilish). Qaytadan urinib ko'ring." : "Ответ пришёл не полностью (обрыв). Попробуйте ещё раз."),
+    general_recommendations: salvaged.general_recommendations || "", technique: salvaged.technique || "", what_to_say: salvaged.what_to_say || "",
+    what_to_avoid: salvaged.what_to_avoid || "", must_not_do: salvaged.must_not_do || "", timing: salvaged.timing || "", closing: salvaged.closing || "",
+    visual_aid_id: null, visual_aid_script: "", promo_material_id: null, promo_material_script: "", _parse_error: true,
+  };
 }
 
 module.exports = { aiEnabled, AI_MODEL, buildAnalyticsContext, callClaude, callClaudeTeamAnalysis, callClaudeForNavi };

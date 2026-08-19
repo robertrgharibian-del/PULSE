@@ -98,7 +98,7 @@ export default function NaviList({ user }) {
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-5 py-8">
       <div className="flex items-center gap-3 mb-1">
-        <img src="/navi.png" alt="NAVI" style={{ height: "48px", width: "auto" }} />
+        <img src="/navi.png" alt="NAVI" style={{ height: "104px", width: "auto" }} />
         <div>
           <div className="font-display text-2xl font-semibold">NAVI</div>
           <div className="text-sm" style={{ color: "#6B7280" }}>{t("navi.subtitle")}</div>

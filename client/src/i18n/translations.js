@@ -167,6 +167,21 @@ export const translations = {
     "navi.sec_visual_aid": "Рекомендованный слайд Visual Aid",
     "navi.sec_promo_material": "Рекомендованный промо материал",
 
+    "doctordetail.err_date_product": "Укажите дату и препарат",
+    "doctordetail.conference": "Мероприятие",
+    "doctordetail.total_contribution": "Общий вклад",
+    "doctordetail.contribution_by_month": "Вклад по месяцам",
+    "doctordetail.dynamics_by_pharmacy": "Динамика по аптекам",
+    "doctordetail.indicator_pharmacies": "Индикаторные аптеки",
+    "doctordetail.no_pharmacies": "Аптеки не заданы",
+    "doctordetail.add_log_entry": "Добавить запись",
+    "doctordetail.pharmacy": "Аптека",
+    "doctordetail.product": "Препарат",
+    "doctordetail.qty_packages": "Кол-во, уп.",
+    "doctordetail.control_log": "Журнал контроля",
+    "doctordetail.pack_short": "уп.",
+    "doctordetail.no_entries": "Записей пока нет",
+
     "mp.my_report": "Мой отчёт",
 
     "help.subtitle": "Справочник техник визита и подбор рекомендаций под конкретного врача",
@@ -423,6 +438,21 @@ export const translations = {
     "navi.sec_closing": "Kelishuvga qanday erishish kerak",
     "navi.sec_visual_aid": "Tavsiya etilgan Visual Aid slayd",
     "navi.sec_promo_material": "Tavsiya etilgan promo material",
+
+    "doctordetail.err_date_product": "Sana va preparatni kiriting",
+    "doctordetail.conference": "Tadbir",
+    "doctordetail.total_contribution": "Umumiy hissa",
+    "doctordetail.contribution_by_month": "Oylar bo'yicha hissa",
+    "doctordetail.dynamics_by_pharmacy": "Dorixonalar bo'yicha dinamika",
+    "doctordetail.indicator_pharmacies": "Indikator dorixonalar",
+    "doctordetail.no_pharmacies": "Dorixonalar belgilanmagan",
+    "doctordetail.add_log_entry": "Yozuv qo'shish",
+    "doctordetail.pharmacy": "Dorixona",
+    "doctordetail.product": "Preparat",
+    "doctordetail.qty_packages": "Miqdor, up.",
+    "doctordetail.control_log": "Nazorat jurnali",
+    "doctordetail.pack_short": "up.",
+    "doctordetail.no_entries": "Hozircha yozuvlar yo'q",
 
     "mp.my_report": "Mening hisobotim",
 

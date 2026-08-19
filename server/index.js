@@ -99,6 +99,17 @@ function bonusFor(achievement, baseRate) {
 }
 const MONTH_NAMES_RU = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"];
 function monthNameRu(m) { return MONTH_NAMES_RU[(m - 1 + 12) % 12]; }
+function sanitizeFilename(s) { return String(s || "").replace(/[\\/:*?"<>|]/g, "").trim(); }
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function reportExportFilename(data, ext) {
+  return `${sanitizeFilename(data.mp.full_name)}_${monthNameRu(data.report.period_month)}_${data.report.period_year}_${todayStr()}.${ext}`;
+}
+function analyticsExportFilename(data, ext) {
+  return `Аналитика_${sanitizeFilename(data.scope_label)}_${todayStr()}.${ext}`;
+}
 
 function tierLabel(achievement) {
   if (achievement < 0.9) return "Нет бонуса (<90%)";
@@ -189,7 +200,7 @@ app.post("/api/auth/login", async (req, res) => {
   const ok = await bcrypt.compare(password, user.password_hash);
   if (!ok) return res.status(401).json({ error: "Неверный email или пароль" });
   const token = jwt.sign(
-    { id: user.id, role: user.role, full_name: user.full_name, email: user.email, group_id: user.group_id },
+    { id: user.id, role: user.role, full_name: user.full_name, email: user.email, group_id: user.group_id, territory: user.territory },
     JWT_SECRET,
     { expiresIn: "12h" }
   );
@@ -1003,9 +1014,9 @@ app.get("/api/portfolio-brochure.pdf", auth, async (req, res) => {
    ============================================================ */
 async function naviDoctorScope(user) {
   if (user.role === "master") return { where: "1=1", values: [] };
-  if (user.role === "mp") return { where: "d.mp_id = $1", values: [user.id] };
-  if (user.role === "rm") return { where: "mp.rm_id = $1", values: [user.id] };
-  if (user.role === "bm") return { where: "mp.group_id = $1", values: [user.group_id] };
+  if (user.role === "mp") return { where: "d.territory = (select territory from users where id = $1)", values: [user.id] };
+  if (user.role === "rm") return { where: "d.territory in (select territory from users where rm_id = $1 and role='mp' and territory is not null)", values: [user.id] };
+  if (user.role === "bm") return { where: "d.territory in (select territory from users where group_id = $1 and role='mp' and territory is not null)", values: [user.group_id] };
   return { where: "1=0", values: [] };
 }
 
@@ -1021,7 +1032,7 @@ app.get("/api/navi/doctors", auth, async (req, res) => {
   const { rows } = await pool.query(
     `select d.*, mp.full_name as mp_name,
             (select count(*) from navi_visits v where v.doctor_id=d.id) as visit_count
-     from navi_doctors d join users mp on mp.id=d.mp_id
+     from navi_doctors d left join users mp on mp.id=d.mp_id
      where ${where} order by d.last_name`,
     params
   );
@@ -1032,9 +1043,9 @@ app.post("/api/navi/doctors", auth, requireRole("mp"), async (req, res) => {
   const { last_name, first_name, patronymic, city, lpu, specialty, experience_years, psychotype, visit_minutes, needs, behavior, products } = req.body;
   if (!last_name || !last_name.trim()) return res.status(400).json({ error: "Укажите фамилию врача" });
   const { rows } = await pool.query(
-    `insert into navi_doctors (mp_id, last_name, first_name, patronymic, city, lpu, specialty, experience_years, psychotype, visit_minutes, needs, behavior)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`,
-    [req.user.id, last_name.trim(), first_name || "", patronymic || "", city || "", lpu || "", specialty || "", experience_years || null, psychotype || "", visit_minutes || null, needs || "", behavior || ""]
+    `insert into navi_doctors (mp_id, territory, last_name, first_name, patronymic, city, lpu, specialty, experience_years, psychotype, visit_minutes, needs, behavior)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) returning *`,
+    [req.user.id, req.user.territory || null, last_name.trim(), first_name || "", patronymic || "", city || "", lpu || "", specialty || "", experience_years || null, psychotype || "", visit_minutes || null, needs || "", behavior || ""]
   );
   const doctor = rows[0];
   for (const p of (products || [])) {
@@ -1045,20 +1056,27 @@ app.post("/api/navi/doctors", auth, requireRole("mp"), async (req, res) => {
 });
 
 async function canAccessNaviDoctor(user, doctorId) {
-  const r = await pool.query(`select d.mp_id, mp.rm_id, mp.group_id from navi_doctors d join users mp on mp.id=d.mp_id where d.id=$1`, [doctorId]);
+  const r = await pool.query(`select territory from navi_doctors where id=$1`, [doctorId]);
   const row = r.rows[0];
   if (!row) return false;
   if (user.role === "master") return true;
-  if (user.role === "mp") return row.mp_id === user.id;
-  if (user.role === "rm") return row.rm_id === user.id;
-  if (user.role === "bm") return row.group_id === user.group_id;
+  if (!row.territory) return false;
+  if (user.role === "mp") return row.territory === user.territory;
+  if (user.role === "rm") {
+    const t = await pool.query("select 1 from users where rm_id=$1 and role='mp' and territory=$2", [user.id, row.territory]);
+    return t.rows.length > 0;
+  }
+  if (user.role === "bm") {
+    const t = await pool.query("select 1 from users where group_id=$1 and role='mp' and territory=$2", [user.group_id, row.territory]);
+    return t.rows.length > 0;
+  }
   return false;
 }
 
 app.get("/api/navi/doctors/:id", auth, async (req, res) => {
   const { id } = req.params;
   if (!(await canAccessNaviDoctor(req.user, id))) return res.status(403).json({ error: "Forbidden" });
-  const dRes = await pool.query(`select d.*, mp.full_name as mp_name from navi_doctors d join users mp on mp.id=d.mp_id where d.id=$1`, [id]);
+  const dRes = await pool.query(`select d.*, mp.full_name as mp_name from navi_doctors d left join users mp on mp.id=d.mp_id where d.id=$1`, [id]);
   const productsRes = await pool.query(
     `select dp.*, p.name as product_name from navi_doctor_products dp join products p on p.id=dp.product_id where dp.doctor_id=$1`, [id]
   );
@@ -1067,13 +1085,14 @@ app.get("/api/navi/doctors/:id", auth, async (req, res) => {
      from navi_visits v left join product_promo_materials pm on pm.id=v.promo_material_id
      where v.doctor_id=$1 order by v.created_at desc`, [id]
   );
-  res.json({ doctor: dRes.rows[0], products: productsRes.rows, visits: visitsRes.rows, can_edit: req.user.role === "mp" && dRes.rows[0].mp_id === req.user.id });
+  const canEdit = req.user.role === "mp" && !!req.user.territory && dRes.rows[0].territory === req.user.territory;
+  res.json({ doctor: dRes.rows[0], products: productsRes.rows, visits: visitsRes.rows, can_edit: canEdit });
 });
 
 app.put("/api/navi/doctors/:id", auth, requireRole("mp"), async (req, res) => {
   const { id } = req.params;
-  const check = await pool.query("select mp_id from navi_doctors where id=$1", [id]);
-  if (!check.rows[0] || check.rows[0].mp_id !== req.user.id) return res.status(403).json({ error: "Forbidden" });
+  const check = await pool.query("select territory from navi_doctors where id=$1", [id]);
+  if (!check.rows[0] || !req.user.territory || check.rows[0].territory !== req.user.territory) return res.status(403).json({ error: "Forbidden" });
   const { last_name, first_name, patronymic, city, lpu, specialty, experience_years, psychotype, visit_minutes, needs, behavior, products } = req.body;
   await pool.query(
     `update navi_doctors set last_name=coalesce($1,last_name), first_name=coalesce($2,first_name), patronymic=coalesce($3,patronymic),
@@ -1094,8 +1113,8 @@ app.put("/api/navi/doctors/:id", auth, requireRole("mp"), async (req, res) => {
 
 app.delete("/api/navi/doctors/:id", auth, requireRole("mp"), async (req, res) => {
   const { id } = req.params;
-  const check = await pool.query("select mp_id from navi_doctors where id=$1", [id]);
-  if (!check.rows[0] || check.rows[0].mp_id !== req.user.id) return res.status(403).json({ error: "Forbidden" });
+  const check = await pool.query("select territory from navi_doctors where id=$1", [id]);
+  if (!check.rows[0] || !req.user.territory || check.rows[0].territory !== req.user.territory) return res.status(403).json({ error: "Forbidden" });
   await pool.query("delete from navi_doctors where id=$1", [id]);
   res.json({ ok: true });
 });
@@ -1104,8 +1123,8 @@ app.post("/api/navi/doctors/:id/start-visit", auth, requireRole("mp"), async (re
   if (!aiEnabled) return res.status(503).json({ error: "NAVI не настроен на сервере (нет ANTHROPIC_API_KEY)" });
   const { id } = req.params;
   const { lang, visit_goal, products } = req.body;
-  const check = await pool.query("select mp_id from navi_doctors where id=$1", [id]);
-  if (!check.rows[0] || check.rows[0].mp_id !== req.user.id) return res.status(403).json({ error: "Forbidden" });
+  const check = await pool.query("select territory from navi_doctors where id=$1", [id]);
+  if (!check.rows[0] || !req.user.territory || check.rows[0].territory !== req.user.territory) return res.status(403).json({ error: "Forbidden" });
 
   const dRes = await pool.query("select * from navi_doctors where id=$1", [id]);
   const historicalPrescriptionsRes = await pool.query(
@@ -1182,7 +1201,7 @@ app.post("/api/navi/doctors/:id/start-visit", auth, requireRole("mp"), async (re
   const { rows } = await pool.query(
     `insert into navi_visits (doctor_id, ai_recommendation, ai_lang, visit_goal, visit_products, ai_sections, visual_aid_id, promo_material_id)
      values ($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
-    [id, sections.general_recommendations || "", lang === "uz" ? "uz" : "ru", visit_goal || "", JSON.stringify(visitProducts), JSON.stringify(sections), visualAidId, promoMaterialId]
+    [id, sections.general_recommendations || "", lang === "uz" ? "uz" : "ru", visit_goal || "", visitProducts, sections, visualAidId, promoMaterialId]
   );
   res.json(rows[0]);
 });
@@ -1190,13 +1209,13 @@ app.post("/api/navi/doctors/:id/start-visit", auth, requireRole("mp"), async (re
 app.put("/api/navi/visits/:id", auth, requireRole("mp"), async (req, res) => {
   const { id } = req.params;
   const check = await pool.query(
-    `select v.id, d.mp_id from navi_visits v join navi_doctors d on d.id=v.doctor_id where v.id=$1`, [id]
+    `select v.id, d.territory from navi_visits v join navi_doctors d on d.id=v.doctor_id where v.id=$1`, [id]
   );
-  if (!check.rows[0] || check.rows[0].mp_id !== req.user.id) return res.status(403).json({ error: "Forbidden" });
+  if (!check.rows[0] || !req.user.territory || check.rows[0].territory !== req.user.territory) return res.status(403).json({ error: "Forbidden" });
   const { mp_report, post_visit_brands, post_visit_agreements } = req.body;
   await pool.query(
     "update navi_visits set mp_report=$1, post_visit_brands=$2, post_visit_agreements=$3, reported_at=now() where id=$4",
-    [mp_report || "", JSON.stringify(post_visit_brands || []), JSON.stringify(post_visit_agreements || []), id]
+    [mp_report || "", post_visit_brands || [], post_visit_agreements || [], id]
   );
   // Keep the doctor's "already prescribes" reference numbers current for next visit's auto-fill
   const doctorRes = await pool.query("select doctor_id from navi_visits where id=$1", [id]);
@@ -1418,7 +1437,7 @@ app.post("/api/import/fss", auth, requireRole("master"), upload.single("file"), 
   const summary = { mp_updated: mpUpdated, unmatched_products: unmatchedProducts, missing_areas: missingAreas, no_mp_for_territory: noMpForTerritory };
   const logRes = await pool.query(
     "insert into import_log (import_type, period_year, period_month, uploaded_by, summary, changes) values ('fss',$1,$2,$3,$4,$5) returning id",
-    [year, month, req.user.id, summary, JSON.stringify(changes)]
+    [year, month, req.user.id, summary, changes]
   );
   res.json({ ...summary, import_id: logRes.rows[0].id });
 });
@@ -1464,7 +1483,7 @@ app.post("/api/import/targets", auth, requireRole("master"), upload.single("file
   const summary = { mp_updated: mpUpdated, unmatched_products: unmatchedProducts, missing_sheets: missingSheets, no_mp_for_territory: noMpForTerritory };
   const logRes = await pool.query(
     "insert into import_log (import_type, period_year, uploaded_by, summary, changes) values ('targets',$1,$2,$3,$4) returning id",
-    [1999 + Number(fy), req.user.id, summary, JSON.stringify(changes)]
+    [1999 + Number(fy), req.user.id, summary, changes]
   );
   res.json({ ...summary, import_id: logRes.rows[0].id });
 });
@@ -2257,33 +2276,37 @@ app.get("/api/rm-bonus", auth, async (req, res) => {
    Master → all.
    ============================================================ */
 async function docTrackingScope(user) {
-  // returns { where: sql fragment referencing "mp", values: [] } to inject into a query joining tracked_doctors td + users mp on mp.id=td.mp_id
+  // returns { where: sql fragment referencing "td", values: [] }
   if (user.role === "master") return { where: "1=1", values: [] };
-  if (user.role === "mp") return { where: "td.mp_id = $1", values: [user.id] };
-  if (user.role === "rm") return { where: "mp.rm_id = $1", values: [user.id] };
-  if (user.role === "bm") return { where: "mp.group_id = $1", values: [user.group_id] };
+  if (user.role === "mp") return { where: "td.territory = (select territory from users where id = $1)", values: [user.id] };
+  if (user.role === "rm") return { where: "td.territory in (select territory from users where rm_id = $1 and role='mp' and territory is not null)", values: [user.id] };
+  if (user.role === "bm") return { where: "td.territory in (select territory from users where group_id = $1 and role='mp' and territory is not null)", values: [user.group_id] };
   return { where: "1=0", values: [] };
 }
 
 async function canAccessDoctor(user, doctorId) {
-  const r = await pool.query(
-    `select td.mp_id, mp.rm_id, mp.group_id from tracked_doctors td join users mp on mp.id=td.mp_id where td.id=$1`,
-    [doctorId]
-  );
+  const r = await pool.query(`select territory from tracked_doctors where id=$1`, [doctorId]);
   const row = r.rows[0];
   if (!row) return false;
   if (user.role === "master") return true;
-  if (user.role === "mp") return row.mp_id === user.id;
-  if (user.role === "rm") return row.rm_id === user.id;
-  if (user.role === "bm") return row.group_id === user.group_id;
+  if (!row.territory) return false;
+  if (user.role === "mp") return row.territory === user.territory;
+  if (user.role === "rm") {
+    const t = await pool.query("select 1 from users where rm_id=$1 and role='mp' and territory=$2", [user.id, row.territory]);
+    return t.rows.length > 0;
+  }
+  if (user.role === "bm") {
+    const t = await pool.query("select 1 from users where group_id=$1 and role='mp' and territory=$2", [user.group_id, row.territory]);
+    return t.rows.length > 0;
+  }
   return false;
 }
 
 app.get("/api/doc-tracking/doctors", auth, async (req, res) => {
   const scope = await docTrackingScope(req.user);
   const { rows } = await pool.query(
-    `select td.*, mp.full_name as mp_name, mp.territory as mp_territory
-     from tracked_doctors td join users mp on mp.id=td.mp_id
+    `select td.*, mp.full_name as mp_name
+     from tracked_doctors td left join users mp on mp.id=td.mp_id
      where ${scope.where} order by td.created_at desc`,
     scope.values
   );
@@ -2294,9 +2317,9 @@ app.post("/api/doc-tracking/doctors", auth, requireRole("mp"), async (req, res) 
   const { full_name, specialty, city, clinic, contact, trip_start, trip_end, event_name, event_city, pharmacies } = req.body;
   if (!full_name || !full_name.trim()) return res.status(400).json({ error: "Укажите ФИО врача" });
   const { rows } = await pool.query(
-    `insert into tracked_doctors (mp_id, full_name, specialty, city, clinic, contact, trip_start, trip_end, event_name, event_city)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *`,
-    [req.user.id, full_name, specialty || null, city || null, clinic || null, contact || null, trip_start || null, trip_end || null, event_name || null, event_city || null]
+    `insert into tracked_doctors (mp_id, territory, full_name, specialty, city, clinic, contact, trip_start, trip_end, event_name, event_city)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning *`,
+    [req.user.id, req.user.territory || null, full_name, specialty || null, city || null, clinic || null, contact || null, trip_start || null, trip_end || null, event_name || null, event_city || null]
   );
   const doctor = rows[0];
   let order = 0;
@@ -2330,7 +2353,7 @@ app.get("/api/doc-tracking/doctors/:id", auth, async (req, res) => {
   const { id } = req.params;
   if (!(await canAccessDoctor(req.user, id))) return res.status(403).json({ error: "Forbidden" });
   const docRes = await pool.query(
-    `select td.*, mp.full_name as mp_name from tracked_doctors td join users mp on mp.id=td.mp_id where td.id=$1`, [id]
+    `select td.*, mp.full_name as mp_name from tracked_doctors td left join users mp on mp.id=td.mp_id where td.id=$1`, [id]
   );
   const pharmRes = await pool.query("select * from doctor_pharmacies where doctor_id=$1 order by sort_order", [id]);
   const logRes = await pool.query(
@@ -2494,7 +2517,7 @@ app.put("/api/development-plans/:mpId", auth, requireRole("rm"), async (req, res
      on conflict (mp_id, period_year, period_month) do update set
        strengths=excluded.strengths, weaknesses=excluded.weaknesses, kpis=excluded.kpis,
        achieved_kpis=excluded.achieved_kpis, rm_comment=excluded.rm_comment, updated_at=now()`,
-    [mpId, req.user.id, period_year, period_month, strengths || "", weaknesses || "", JSON.stringify(kpis || []), JSON.stringify(achieved_kpis || []), rm_comment || ""]
+    [mpId, req.user.id, period_year, period_month, strengths || "", weaknesses || "", kpis || [], achieved_kpis || [], rm_comment || ""]
   );
   res.json({ ok: true });
 });
@@ -2876,7 +2899,7 @@ app.get("/api/ai-insights/export.xlsx", auth, async (req, res) => {
   }
 
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  res.setHeader("Content-Disposition", `attachment; filename="analytics.xlsx"`);
+  res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(analyticsExportFilename(data, "xlsx"))}"`);
   await wb.xlsx.write(res);
   res.end();
   } catch (e) {
@@ -3000,7 +3023,7 @@ app.get("/api/ai-insights/export.pptx", auth, async (req, res) => {
 
   const buffer = await pptx.write({ outputType: "nodebuffer" });
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation");
-  res.setHeader("Content-Disposition", `attachment; filename="analytics.pptx"`);
+  res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(analyticsExportFilename(data, "pptx"))}"`);
   res.end(buffer);
   } catch (e) {
     console.error("Analytics pptx export failed:", e.message, e.stack);
@@ -3174,6 +3197,14 @@ async function loadFullReport(rid) {
   const forecastTotalUsd = forecast.reduce((s, f) => s + f.total_usd, 0);
   const forecastTargetUsd = forecast.reduce((s, f) => s + f.next_target_usd, 0);
 
+  // Latest cached Analytics for this MP (if the MP has ever opened the Аналитика tab) — the
+  // business review report includes this summary, but never triggers a fresh AI call on its own.
+  const analyticsRes = await pool.query(
+    "select content, created_at from ai_insights where scope='mp' and scope_id=$1 order by created_at desc limit 1",
+    [report.mp_id]
+  );
+  const analytics = analyticsRes.rows[0] ? { ...analyticsRes.rows[0].content, generated_at: analyticsRes.rows[0].created_at } : null;
+
   return {
     report, mp: mpRes.rows[0], rm_name: rmRes.rows[0]?.full_name || "—",
     fssItems, targetUsd, actualUsd, achievement, rawBonusUzs, bonusUzs, bonusUsd: bonusUzs / Number(report.fx_rate),
@@ -3182,6 +3213,7 @@ async function loadFullReport(rid) {
     comments: commentsRes.rows, quarterBonus, docTracking, docTrackingGrouped,
     forecast, forecastTotalUsd, forecastTargetUsd, forecastPeriod: { year: nextYear, month: nextMonth },
     opportunities: oppRes.rows.map((o) => o.name),
+    analytics,
   };
 }
 
@@ -3362,8 +3394,35 @@ app.get("/api/reports/:id/export/xlsx", auth, async (req, res) => {
   }
   ws7.columns.forEach((c) => (c.width = 26));
 
+  if (data.analytics) {
+    const ws8 = wb.addWorksheet("Аналитика", { views: [{ showGridLines: false }] });
+    ws8.mergeCells("A1:E1");
+    ws8.getCell("A1").value = "Аналитика (ИИ-анализ)";
+    ws8.getCell("A1").font = titleFont;
+    ws8.getCell("A2").value = `Сформировано: ${new Date(data.analytics.generated_at).toLocaleString("ru-RU")}`;
+    ws8.getCell("A2").font = { italic: true, color: { argb: "FF6B7280" } };
+    let ar = 5;
+    const textSection = (title, text) => {
+      if (!text) return;
+      ws8.getCell(`A${ar}`).value = title; ws8.getCell(`A${ar}`).font = { bold: true, size: 13, color: { argb: NAVY } };
+      ar += 1;
+      ws8.mergeCells(`A${ar}:E${ar}`);
+      ws8.getCell(`A${ar}`).value = text; ws8.getCell(`A${ar}`).alignment = { wrapText: true, vertical: "top" };
+      ws8.getRow(ar).height = Math.max(20, Math.ceil(text.length / 90) * 15);
+      ar += 2;
+    };
+    textSection("Главный вывод", data.analytics.summary);
+    textSection("Динамика месяц-к-месяцу", data.analytics.monthly_dynamics);
+    textSection("Конверсия и увеличение потенциала", data.analytics.conversion_potential_analysis);
+    textSection("Работа с трудными врачами (NAVI)", data.analytics.navi_analysis);
+    if (data.analytics.risks?.length) textSection("Риски", data.analytics.risks.map((x) => `• ${x}`).join("\n"));
+    if (data.analytics.short_term_recommendations?.length) textSection("Рекомендации: краткосрочно", data.analytics.short_term_recommendations.map((x) => `• ${x}`).join("\n"));
+    if (data.analytics.long_term_recommendations?.length) textSection("Рекомендации: долгосрочно", data.analytics.long_term_recommendations.map((x) => `• ${x}`).join("\n"));
+    ws8.columns = Array(5).fill({ width: 22 });
+  }
+
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  res.setHeader("Content-Disposition", `attachment; filename="report_${rid}.xlsx"`);
+  res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(reportExportFilename(data, "xlsx"))}"`);
   await wb.xlsx.write(res);
   res.end();
 });
@@ -3682,9 +3741,24 @@ app.get("/api/reports/:id/export/pptx", auth, async (req, res) => {
     s.addText(`${pct.toFixed(1)}%`, { x: 6.5, y: 6.05, fontSize: 20, bold: true, color: pct >= 100 ? GREEN : RED });
   }
 
+  // ---- Slide 10: Аналитика (ИИ-анализ), если МП уже открывал вкладку Аналитика ----
+  if (data.analytics) {
+    s = pptx.addSlide(); chrome(s, "Аналитика — главный вывод");
+    s.addText(data.analytics.summary || "", { x: 0.5, y: 1.1, w: 12.3, h: 2.2, fontSize: 13, color: INK, valign: "top" });
+    if (data.analytics.conversion_potential_analysis) {
+      s.addText("Конверсия и увеличение потенциала", { x: 0.5, y: 3.5, fontSize: 13, bold: true, color: NAVY });
+      s.addText(data.analytics.conversion_potential_analysis, { x: 0.5, y: 3.9, w: 12.3, h: 1.8, fontSize: 11, color: INK, valign: "top" });
+    }
+    if (data.analytics.short_term_recommendations?.length) {
+      s = pptx.addSlide(); chrome(s, "Аналитика — рекомендации");
+      const bullets = data.analytics.short_term_recommendations.map((it) => ({ text: it, options: { bullet: true, color: ACCENT, breakLine: true, fontSize: 12 } }));
+      s.addText(bullets, { x: 0.5, y: 1.1, w: 12.3, h: 5.8, valign: "top" });
+    }
+  }
+
   const buffer = await pptx.write({ outputType: "nodebuffer" });
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation");
-  res.setHeader("Content-Disposition", `attachment; filename="report_${rid}.pptx"`);
+  res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(reportExportFilename(data, "pptx"))}"`);
   res.end(buffer);
 });
 

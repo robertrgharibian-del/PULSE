@@ -71,7 +71,7 @@ function PreVisitForm({ portfolioProducts, doctorProducts, onStarted }) {
 
   return (
     <div className="rounded-2xl p-5 mb-6" style={{ background: "linear-gradient(135deg,#EEF1F8,#F7F8FC)", border: "1px solid #E4E7F0" }}>
-      <img src="/navi.png" alt="NAVI" style={{ height: "56px", width: "auto" }} className="mb-3" />
+      <img src="/navi.png" alt="NAVI" style={{ height: "112px", width: "auto" }} className="mb-3" />
       <div className="text-xs uppercase mb-1" style={{ color: "#6B7280" }}>{t("navi.visit_goal")}</div>
       <textarea rows={2} value={goal} onChange={(e) => setGoal(e.target.value)} placeholder={t("navi.visit_goal_placeholder")}
         className="w-full bg-transparent border rounded px-3 py-2 text-sm mb-4" style={{ borderColor: "#D3D8E4" }} />
@@ -97,6 +97,16 @@ function PreVisitForm({ portfolioProducts, doctorProducts, onStarted }) {
       <button type="button" onClick={addProduct} className="text-sm px-3 py-1.5 rounded mb-4" style={{ background: "#E4E7F0" }}>+ {t("navi.add_brand")}</button>
 
       {error && <div className="text-sm mb-3" style={{ color: "#DC2626" }}>{error}</div>}
+      {busy && (
+        <div className="flex flex-col items-center mb-4">
+          <img src="/navi.png" alt="NAVI" className="navi-thinking" style={{ height: "72px", width: "auto" }} />
+          <div className="flex gap-1 mt-2">
+            <span className="navi-dot" style={{ animationDelay: "0s" }} />
+            <span className="navi-dot" style={{ animationDelay: "0.2s" }} />
+            <span className="navi-dot" style={{ animationDelay: "0.4s" }} />
+          </div>
+        </div>
+      )}
       <div>
         <button onClick={submit} disabled={busy} className="px-6 py-3 rounded-full font-semibold" style={{ background: "#ED3237", color: "#FFFFFF" }}>
           {busy ? t("navi.thinking") : t("navi.start_visit")}
@@ -153,7 +163,7 @@ function VisitCard({ visit, canEdit, portfolioProducts, onReported, t, isLatest 
     <div className="rounded-2xl p-4 mb-3" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
         <div className="flex items-center gap-2">
-          <img src="/navi.png" alt="NAVI" style={{ height: "24px", width: "auto" }} />
+          <img src="/navi.png" alt="NAVI" style={{ height: "48px", width: "auto" }} />
           <div className="text-xs" style={{ color: "#6B7280" }}>{dateStr}</div>
         </div>
         <button onClick={() => setShowAi((v) => !v)} className="text-xs px-3 py-1 rounded-full" style={{ background: "#E4E7F0" }}>
@@ -294,7 +304,7 @@ export default function NaviDoctorDetail({ doctorId, user, onBack }) {
 
       {canEdit && !showPreVisit && (
         <div className="rounded-2xl p-5 mb-6 text-center" style={{ background: "linear-gradient(135deg,#EEF1F8,#F7F8FC)", border: "1px solid #E4E7F0" }}>
-          <img src="/navi.png" alt="NAVI" style={{ height: "72px", width: "auto" }} className="mx-auto mb-2" />
+          <img src="/navi.png" alt="NAVI" style={{ height: "128px", width: "auto" }} className="mx-auto mb-2" />
           <div className="text-sm mb-3" style={{ color: "#6B7280" }}>{t("navi.start_visit_hint")}</div>
           <button onClick={() => setShowPreVisit(true)} className="px-6 py-3 rounded-full font-semibold" style={{ background: "#ED3237", color: "#FFFFFF" }}>
             {t("navi.start_visit")}

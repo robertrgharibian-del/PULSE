@@ -238,7 +238,8 @@ create index if not exists idx_dev_plans_mp on development_plans(mp_id, period_y
 -- migration 008 (kept in sync here for fresh installs — see migration_008.sql for existing DBs) — DOC TRACKING
 create table if not exists tracked_doctors (
   id             bigserial primary key,
-  mp_id          bigint not null references users(id) on delete cascade,
+  mp_id          bigint references users(id) on delete set null,
+  territory      text,
   full_name      text not null,
   specialty      text,
   city           text,
@@ -251,6 +252,7 @@ create table if not exists tracked_doctors (
   created_at     timestamptz not null default now()
 );
 create index if not exists idx_tracked_doctors_mp on tracked_doctors(mp_id);
+create index if not exists idx_tracked_doctors_territory on tracked_doctors(territory);
 create table if not exists doctor_pharmacies (
   id          bigserial primary key,
   doctor_id   bigint not null references tracked_doctors(id) on delete cascade,
@@ -390,7 +392,8 @@ create index if not exists idx_activity_entries_type on activity_entries(activit
 -- migration 013 (kept in sync here for fresh installs — see migration_013.sql for existing DBs) — NAVI
 create table if not exists navi_doctors (
   id               bigserial primary key,
-  mp_id            bigint not null references users(id) on delete cascade,
+  mp_id            bigint references users(id) on delete set null,
+  territory        text,
   last_name        text not null,
   first_name       text,
   patronymic       text,
@@ -406,6 +409,7 @@ create table if not exists navi_doctors (
   updated_at       timestamptz not null default now()
 );
 create index if not exists idx_navi_doctors_mp on navi_doctors(mp_id);
+create index if not exists idx_navi_doctors_territory on navi_doctors(territory);
 create table if not exists navi_doctor_products (
   id              bigserial primary key,
   doctor_id       bigint not null references navi_doctors(id) on delete cascade,

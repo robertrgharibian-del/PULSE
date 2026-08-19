@@ -73,8 +73,8 @@ export default function App() {
       <div style={{ background: NAVY }}>
         <div className="flex items-center justify-between px-4 sm:px-6 py-3">
           <div className="flex items-center gap-2">
-            <div className="rounded-lg px-2.5 py-1.5" style={{ background: "#FFFFFF" }}>
-              <img src="/pulse-logo.png" alt="PULSE" style={{ height: "36px", width: "auto", display: "block" }} />
+            <div className="rounded-lg px-3 py-2" style={{ background: "#FFFFFF" }}>
+              <img src="/pulse-logo.png" alt="PULSE" className="h-14 sm:h-20" style={{ width: "auto", display: "block" }} />
             </div>
           </div>
           <div className="flex items-center gap-3 sm:gap-4 text-xs sm:text-sm">
