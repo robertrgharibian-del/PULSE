@@ -75,11 +75,17 @@ export default function DocTrackingList({ user }) {
   const [doctors, setDoctors] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
   async function load() {
-    setLoading(true);
-    setDoctors(await api.listTrackedDoctors());
-    setLoading(false);
+    setLoading(true); setLoadError("");
+    try {
+      setDoctors(await api.listTrackedDoctors());
+    } catch (e) {
+      setLoadError(e.message);
+    } finally {
+      setLoading(false);
+    }
   }
   useEffect(() => { load(); }, []);
 
@@ -92,6 +98,7 @@ export default function DocTrackingList({ user }) {
 
       {user.role === "mp" && <AddDoctorForm onCreated={load} />}
 
+      {loadError && <div className="text-sm mb-4 px-3 py-2 rounded" style={{ background: "#DC262622", color: "#DC2626" }}>{loadError}</div>}
       {loading ? <div style={{ color: "#6B7280" }}>{t("common.loading")}</div> : (
         <div className="space-y-2">
           {doctors.map((d) => (

@@ -85,10 +85,16 @@ export default function NaviList({ user }) {
   const [selectedId, setSelectedId] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  const [loadError, setLoadError] = useState("");
   async function load() {
-    setLoading(true);
-    setDoctors(await api.listNaviDoctors(search));
-    setLoading(false);
+    setLoading(true); setLoadError("");
+    try {
+      setDoctors(await api.listNaviDoctors(search));
+    } catch (e) {
+      setLoadError(e.message);
+    } finally {
+      setLoading(false);
+    }
   }
   useEffect(() => { load(); }, [search]);
   useEffect(() => { api.listPortfolio().then(setPortfolioProducts); }, []);
@@ -110,6 +116,7 @@ export default function NaviList({ user }) {
 
       {user.role === "mp" && <AddDoctorForm portfolioProducts={portfolioProducts} onCreated={load} />}
 
+      {loadError && <div className="text-sm mb-4 px-3 py-2 rounded" style={{ background: "#DC262622", color: "#DC2626" }}>{loadError}</div>}
       {loading ? <div style={{ color: "#6B7280" }}>{t("common.loading")}</div> : (
         <div className="space-y-2">
           {doctors.map((d) => (
