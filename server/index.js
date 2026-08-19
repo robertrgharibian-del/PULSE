@@ -151,12 +151,17 @@ const FFE_GATE = 0.85; // minimum overall FFE score required for incentive eligi
 /* ============================================================
    Auth middleware
    ============================================================ */
-function auth(req, res, next) {
+async function auth(req, res, next) {
   const header = req.headers.authorization || "";
   const token = (header.startsWith("Bearer ") ? header.slice(7) : null) || req.query.token || null;
   if (!token) return res.status(401).json({ error: "No token" });
   try {
-    req.user = jwt.verify(token, JWT_SECRET);
+    const payload = jwt.verify(token, JWT_SECRET);
+    // Territory/group can change after a token was issued (or the token may predate
+    // territory being added to the JWT at all) — always use the current DB value.
+    const fresh = await pool.query("select territory, group_id, is_active from users where id=$1", [payload.id]);
+    if (!fresh.rows[0] || !fresh.rows[0].is_active) return res.status(401).json({ error: "Invalid token" });
+    req.user = { ...payload, territory: fresh.rows[0].territory, group_id: fresh.rows[0].group_id };
     next();
   } catch (e) {
     return res.status(401).json({ error: "Invalid token" });

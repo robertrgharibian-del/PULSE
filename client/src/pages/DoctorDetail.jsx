@@ -15,13 +15,25 @@ export default function DoctorDetail({ doctorId, user, onBack }) {
   const [qty, setQty] = useState("");
 
   async function load() {
-    const d = await api.getTrackedDoctor(doctorId);
-    setData(d);
+    setError("");
+    try {
+      setData(await api.getTrackedDoctor(doctorId));
+    } catch (e) {
+      setError(e.message);
+    }
   }
   useEffect(() => { load(); api.listProducts().then(setProducts); }, [doctorId]);
 
-  const canEdit = data ? user.role === "mp" && data.doctor.mp_id === user.id : false;
+  const canEdit = data ? user.role === "mp" && !!user.territory && data.doctor.territory === user.territory : false;
 
+  if (error && !data) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 sm:px-5 py-8">
+        <button onClick={onBack} className="text-sm mb-4" style={{ color: "#6B7280" }}>← {t("common.back")}</button>
+        <div className="text-sm px-3 py-2 rounded" style={{ background: "#DC262622", color: "#DC2626" }}>{error}</div>
+      </div>
+    );
+  }
   if (!data) return <div className="p-8" style={{ color: "#6B7280" }}>{t("common.loading")}</div>;
 
   async function addLog() {
