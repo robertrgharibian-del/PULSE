@@ -518,6 +518,10 @@ app.put("/api/brands/:id", auth, requireRole("master", "bm"), async (req, res) =
   if (!fields.length) return res.status(400).json({ error: "Нет полей для обновления" });
   values.push(id);
   await pool.query(`update brands set ${fields.join(", ")} where id=$${i}`, values);
+  // Every SKU in this brand follows the brand's team — keep them in sync automatically
+  if (group_id !== undefined && req.user.role === "master") {
+    await pool.query("update products set group_id=$1 where brand_id=$2", [group_id || null, id]);
+  }
   res.json({ ok: true });
 });
 
@@ -570,13 +574,18 @@ app.get("/api/portfolio", auth, async (req, res) => {
 });
 
 app.post("/api/portfolio", auth, requireRole("master", "bm"), async (req, res) => {
-  const { name, nrv_usd, group_id } = req.body;
+  const { name, nrv_usd, brand_id } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ error: "Укажите название препарата" });
-  const gid = req.user.role === "bm" ? req.user.group_id : group_id;
-  if (!gid) return res.status(400).json({ error: "Укажите группу" });
+  let gid = req.user.role === "bm" ? req.user.group_id : null;
+  if (brand_id) {
+    const b = await pool.query("select group_id from brands where id=$1", [brand_id]);
+    if (!b.rows[0]) return res.status(400).json({ error: "Бренд не найден" });
+    if (req.user.role === "bm" && b.rows[0].group_id !== req.user.group_id) return res.status(403).json({ error: "Forbidden" });
+    gid = b.rows[0].group_id;
+  }
   const { rows } = await pool.query(
-    "insert into products (name, nrv_usd, group_id, sort_order) values ($1,$2,$3,999) returning *",
-    [name.trim(), nrv_usd || 0, gid]
+    "insert into products (name, nrv_usd, group_id, brand_id, sort_order) values ($1,$2,$3,$4,999) returning *",
+    [name.trim(), nrv_usd || 0, gid, brand_id || null]
   );
   res.json(rows[0]);
 });
@@ -626,17 +635,23 @@ app.put("/api/portfolio/:id", auth, requireRole("master", "bm"), async (req, res
   const { id } = req.params;
   const pRes = await pool.query("select group_id from products where id=$1", [id]);
   if (!pRes.rows[0] || !canEditProduct(req.user, pRes.rows[0].group_id)) return res.status(403).json({ error: "Forbidden" });
-  const { name, key_messages, positioning, patient_portraits, nrv_usd, group_id, brand_id } = req.body;
-  // only master may move a product to a different group
-  const newGroupId = req.user.role === "master" ? group_id : undefined;
+  const { name, key_messages, positioning, patient_portraits, nrv_usd, brand_id } = req.body;
   await pool.query(
     `update products set name=coalesce($1,name), key_messages=coalesce($2,key_messages), positioning=coalesce($3,positioning),
-     patient_portraits=coalesce($4,patient_portraits), nrv_usd=coalesce($5,nrv_usd), group_id=coalesce($6,group_id), updated_at=now() where id=$7`,
-    [name, key_messages, positioning, patient_portraits, nrv_usd, newGroupId, id]
+     patient_portraits=coalesce($4,patient_portraits), nrv_usd=coalesce($5,nrv_usd), updated_at=now() where id=$6`,
+    [name, key_messages, positioning, patient_portraits, nrv_usd, id]
   );
-  // brand_id handled separately: undefined = don't touch, null/"" = explicitly unlink from any brand
+  // brand_id handled separately: undefined = don't touch, null/"" = explicitly unlink from any brand.
+  // The SKU's team is always derived from its brand — assigning a brand re-tags the SKU with that brand's team automatically.
   if (brand_id !== undefined) {
-    await pool.query("update products set brand_id=$1 where id=$2", [brand_id || null, id]);
+    if (brand_id) {
+      const b = await pool.query("select group_id from brands where id=$1", [brand_id]);
+      if (!b.rows[0]) return res.status(400).json({ error: "Бренд не найден" });
+      if (req.user.role === "bm" && b.rows[0].group_id !== req.user.group_id) return res.status(403).json({ error: "Forbidden" });
+      await pool.query("update products set brand_id=$1, group_id=$2 where id=$3", [brand_id, b.rows[0].group_id, id]);
+    } else {
+      await pool.query("update products set brand_id=null where id=$1", [id]);
+    }
   }
   res.json({ ok: true });
 });

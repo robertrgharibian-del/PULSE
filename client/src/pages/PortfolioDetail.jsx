@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api, authedDownload } from "../api.js";
 import Lightbox from "../components/Lightbox.jsx";
+import { useLanguage } from "../i18n/LanguageContext.jsx";
 
 function ProgressBar({ progress, done }) {
   if (!progress && !done) return null;
@@ -307,6 +308,7 @@ function ScientificInfoSection({ productId, items, canEdit, onChanged }) {
 }
 
 export default function PortfolioDetail({ productId, user, brands = [], onBack }) {
+  const { t } = useLanguage();
   const [data, setData] = useState(null);
   const [options, setOptions] = useState({ material_types: [], audience_options: [] });
   const [name, setName] = useState("");
@@ -424,17 +426,18 @@ export default function PortfolioDetail({ productId, user, brands = [], onBack }
             <>
               <input value={name} onChange={(e) => setName(e.target.value)} className="font-display text-2xl font-semibold bg-transparent border-b outline-none w-full mb-1" style={{ borderColor: "#D3D8E4" }} />
               <div className="flex flex-wrap items-center gap-2 text-sm" style={{ color: "#6B7280" }}>
-                {data.product.group_name || "—"} ·
                 <span>$</span>
                 <input type="number" value={nrvUsd} onChange={(e) => setNrvUsd(e.target.value)} className="bg-transparent border-b outline-none w-20 font-mono" style={{ borderColor: "#D3D8E4" }} />
                 <span>·</span>
                 <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="bg-transparent border-b outline-none text-sm" style={{ borderColor: "#D3D8E4" }}>
                   <option value="" style={{ color: "#000" }}>Без бренда</option>
-                  {brands.filter((b) => !b.group_id || b.group_id === data.product.group_id).map((b) => (
+                  {brands.map((b) => (
                     <option key={b.id} value={b.id} style={{ color: "#000" }}>{b.name}</option>
                   ))}
                 </select>
+                {data.product.group_name && <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "#E4E7F0" }}>{data.product.group_name}</span>}
               </div>
+              <div className="text-xs mt-1" style={{ color: "#9CA3AF" }}>{t("brands.team_hint")}</div>
             </>
           ) : (
             <>

@@ -5,10 +5,10 @@ import BrandDetail from "./BrandDetail.jsx";
 import { useLanguage } from "../i18n/LanguageContext.jsx";
 
 function AddProductForm({ user, groups, onCreated }) {
+  const { t } = useLanguage();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [nrv, setNrv] = useState("");
-  const [groupId, setGroupId] = useState(user.group_id || "");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -16,7 +16,7 @@ function AddProductForm({ user, groups, onCreated }) {
     if (!name.trim()) { setError("Укажите название"); return; }
     setBusy(true); setError("");
     try {
-      await api.createPortfolioItem({ name: name.trim(), nrv_usd: Number(nrv) || 0, group_id: user.role === "bm" ? undefined : groupId });
+      await api.createPortfolioItem({ name: name.trim(), nrv_usd: Number(nrv) || 0 });
       setName(""); setNrv(""); setOpen(false);
       onCreated();
     } catch (e) { setError(e.message); } finally { setBusy(false); }
@@ -27,15 +27,10 @@ function AddProductForm({ user, groups, onCreated }) {
   return (
     <div className="rounded-2xl p-4 sm:p-5 mb-6" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
       <div className="font-display text-lg mb-3">Новый SKU</div>
-      <div className="grid sm:grid-cols-3 gap-2 text-sm mb-3">
+      <div className="text-xs mb-3" style={{ color: "#6B7280" }}>{t("brands.team_hint")}</div>
+      <div className="grid sm:grid-cols-2 gap-2 text-sm mb-3">
         <input placeholder="Название" value={name} onChange={(e) => setName(e.target.value)} className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }} />
         <input placeholder="Цена NRV, $" type="number" value={nrv} onChange={(e) => setNrv(e.target.value)} className="bg-transparent border rounded px-3 py-2 font-mono" style={{ borderColor: "#D3D8E4" }} />
-        {user.role !== "bm" && (
-          <select value={groupId} onChange={(e) => setGroupId(e.target.value)} className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }}>
-            <option value="" style={{ color: "#000" }}>Команда</option>
-            {groups.map((g) => <option key={g.id} value={g.id} style={{ color: "#000" }}>{g.name}</option>)}
-          </select>
-        )}
       </div>
       {error && <div className="text-sm mb-2" style={{ color: "#DC2626" }}>{error}</div>}
       <div className="flex gap-3">

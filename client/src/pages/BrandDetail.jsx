@@ -32,7 +32,7 @@ export default function BrandDetail({ brandId, user, groups, onBack }) {
   if (!brand) return <div className="p-8" style={{ color: "#6B7280" }}>{t("common.loading")}</div>;
 
   const skusInBrand = allItems.filter((it) => String(it.brand_id) === String(brandId));
-  const skusAvailableToAdd = allItems.filter((it) => String(it.brand_id) !== String(brandId) && it.group_id === brand.group_id);
+  const skusAvailableToAdd = allItems.filter((it) => String(it.brand_id) !== String(brandId));
 
   async function saveEdit() {
     setBusy(true); setError("");

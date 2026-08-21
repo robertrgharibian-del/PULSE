@@ -284,6 +284,7 @@ export const translations = {
     "brands.add_existing_sku": "Добавить существующий SKU",
     "brands.remove_from_brand": "Убрать из бренда",
     "brands.no_more_sku": "Все SKU этой команды уже в этом бренде",
+    "brands.team_hint": "Команда определяется автоматически, как только SKU попадает в бренд",
 
     "login.title": "PULSE",
     "login.email": "Email",
@@ -578,6 +579,7 @@ export const translations = {
     "brands.add_existing_sku": "Mavjud SKU qo'shish",
     "brands.remove_from_brand": "Brenddan chiqarish",
     "brands.no_more_sku": "Bu jamoaning barcha SKUlari allaqachon bu brendda",
+    "brands.team_hint": "Jamoa SKU brendga qo'shilganda avtomatik aniqlanadi",
 
     "login.title": "PULSE",
     "login.email": "Email",
