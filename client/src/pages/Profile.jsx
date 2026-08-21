@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { api } from "../api.js";
 import Avatar from "../components/Avatar.jsx";
 import { useLanguage } from "../i18n/LanguageContext.jsx";
@@ -11,6 +11,11 @@ export default function Profile({ user, onUpdated }) {
   const [error, setError] = useState("");
   const [ok, setOk] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [rmTerritories, setRmTerritories] = useState(null);
+
+  useEffect(() => {
+    if (user.role === "rm") api.listRmTerritories(user.id).then(setRmTerritories);
+  }, [user.id, user.role]);
 
   async function save(e) {
     e.preventDefault();
@@ -36,6 +41,18 @@ export default function Profile({ user, onUpdated }) {
         <Avatar userId={user.id} name={fullName} size={64} />
         <div className="text-xs" style={{ color: "#6B7280" }}>{t("profile.photo_note")}</div>
       </div>
+
+      {user.role === "rm" && rmTerritories && (
+        <div className="rounded-2xl p-5 mb-4" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
+          <div className="text-xs uppercase mb-2" style={{ color: "#6B7280" }}>{t("users.rm_territories")}</div>
+          <div className="flex flex-wrap gap-2">
+            {rmTerritories.map((it) => (
+              <span key={it.id} className="px-2 py-1 rounded-full text-xs" style={{ background: "#E4E7F0" }}>{it.territory}</span>
+            ))}
+            {rmTerritories.length === 0 && <span className="text-xs" style={{ color: "#9CA3AF" }}>{t("users.rm_territories_empty")}</span>}
+          </div>
+        </div>
+      )}
 
       <form onSubmit={save} className="rounded-2xl p-5 space-y-4" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
         <div>

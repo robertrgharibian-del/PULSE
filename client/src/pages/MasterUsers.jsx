@@ -154,6 +154,51 @@ function ResetRequests({ onResolved }) {
   );
 }
 
+function RmTerritoryManager({ rmId, t }) {
+  const [items, setItems] = useState([]);
+  const [newTerritory, setNewTerritory] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function load() { setItems(await api.listRmTerritories(rmId)); }
+  useEffect(() => { load(); }, [rmId]);
+
+  async function add() {
+    if (!newTerritory.trim()) return;
+    setBusy(true); setError("");
+    try { await api.addRmTerritory(rmId, newTerritory.trim()); setNewTerritory(""); await load(); }
+    catch (e) { setError(e.message); } finally { setBusy(false); }
+  }
+
+  async function remove(id) {
+    setBusy(true); setError("");
+    try { await api.removeRmTerritory(rmId, id); await load(); }
+    catch (e) { setError(e.message); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="sm:col-span-2">
+      <span className="text-xs" style={{ color: "#6B7280" }}>{t("users.rm_territories")}</span>
+      <div className="flex flex-wrap gap-2 mt-1 mb-2">
+        {items.map((it) => (
+          <span key={it.id} className="px-2 py-1 rounded-full text-xs flex items-center gap-1" style={{ background: "#E4E7F0" }}>
+            {it.territory}
+            <button onClick={() => remove(it.id)} disabled={busy} style={{ color: "#DC2626" }}>✕</button>
+          </span>
+        ))}
+        {items.length === 0 && <span className="text-xs" style={{ color: "#9CA3AF" }}>{t("users.rm_territories_empty")}</span>}
+      </div>
+      <div className="flex gap-2">
+        <input value={newTerritory} onChange={(e) => setNewTerritory(e.target.value)} placeholder={t("users.rm_territories_placeholder")}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+          className="bg-transparent border rounded px-2 py-1.5 text-sm flex-1" style={{ borderColor: "#D3D8E4" }} />
+        <button onClick={add} disabled={busy} className="px-3 py-1.5 rounded text-xs font-semibold" style={{ background: "#16A34A", color: "#FFFFFF" }}>+ {t("common.add")}</button>
+      </div>
+      {error && <div className="text-xs mt-1" style={{ color: "#DC2626" }}>{error}</div>}
+    </div>
+  );
+}
+
 function EditUserRow({ u, rms, territories, groups, onSaved }) {
   const { t } = useLanguage();
   const [editing, setEditing] = useState(false);
@@ -252,6 +297,7 @@ function EditUserRow({ u, rms, territories, groups, onSaved }) {
                 </select>
               </label>
             )}
+            {u.role === "rm" && <RmTerritoryManager rmId={u.id} t={t} />}
           </div>
           {error && <div className="text-xs mb-2" style={{ color: "#DC2626" }}>{error}</div>}
           <div className="flex gap-2">

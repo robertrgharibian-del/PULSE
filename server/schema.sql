@@ -232,6 +232,16 @@ create index if not exists idx_brands_group on brands(group_id);
 alter table products add column if not exists brand_id bigint references brands(id) on delete set null;
 create index if not exists idx_products_brand on products(brand_id);
 
+-- migration 019 (kept in sync here for fresh installs — see migration_019.sql for existing DBs)
+create table if not exists rm_territories (
+  id         bigserial primary key,
+  rm_id      bigint not null references users(id) on delete cascade,
+  territory  text not null,
+  created_at timestamptz not null default now(),
+  unique (rm_id, territory)
+);
+create index if not exists idx_rm_territories_rm on rm_territories(rm_id);
+
 create table if not exists development_plans (
   id            bigserial primary key,
   mp_id         bigint not null references users(id) on delete cascade,

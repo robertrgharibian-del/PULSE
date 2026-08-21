@@ -271,6 +271,9 @@ export const translations = {
     "users.confirm_permanent_2": "Для подтверждения введите слово {{word}} заглавными буквами:",
     "users.confirm_permanent_cancelled": "Удаление отменено — текст не совпал.",
     "users.confirm_delete_group": "Удалить команду «{{name}}»? Существующие данные сохранятся, но команда исчезнет из списков для новых назначений.",
+    "users.rm_territories": "Территории под управлением РМ",
+    "users.rm_territories_empty": "Пока не добавлено ни одной территории",
+    "users.rm_territories_placeholder": "Название территории",
 
     "brands.title": "Бренды",
     "brands.subtitle": "Объединяйте SKU в бренды и привязывайте бренд к команде",
@@ -566,6 +569,9 @@ export const translations = {
     "users.confirm_permanent_2": "Tasdiqlash uchun {{word}} so'zini katta harflar bilan kiriting:",
     "users.confirm_permanent_cancelled": "O'chirish bekor qilindi — matn mos kelmadi.",
     "users.confirm_delete_group": "«{{name}}» jamoasini o'chirasizmi? Mavjud ma'lumotlar saqlanadi, lekin jamoa yangi tayinlashlar ro'yxatidan yo'qoladi.",
+    "users.rm_territories": "RM boshqaradigan hududlar",
+    "users.rm_territories_empty": "Hozircha birorta hudud qo'shilmagan",
+    "users.rm_territories_placeholder": "Hudud nomi",
 
     "brands.title": "Brendlar",
     "brands.subtitle": "SKUlarni brendlarga birlashtiring va brendni jamoaga bog'lang",

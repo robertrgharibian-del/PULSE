@@ -328,6 +328,45 @@ app.patch("/api/users/:id", auth, requireRole("master"), async (req, res) => {
   res.json({ ok: true });
 });
 
+/* ---- RM-managed territories: a РМ can oversee several territories, independent of which MPs are currently assigned ---- */
+async function canViewRmTerritories(user, rmId) {
+  if (user.role === "master") return true;
+  if (user.role === "rm") return String(user.id) === String(rmId);
+  if (user.role === "bm") {
+    const t = await pool.query("select 1 from users where rm_id=$1 and group_id=$2 and role='mp' limit 1", [rmId, user.group_id]);
+    return t.rows.length > 0;
+  }
+  return false;
+}
+
+app.get("/api/users/:id/territories", auth, async (req, res) => {
+  const { id } = req.params;
+  if (!(await canViewRmTerritories(req.user, id))) return res.status(403).json({ error: "Forbidden" });
+  const { rows } = await pool.query("select * from rm_territories where rm_id=$1 order by territory", [id]);
+  res.json(rows);
+});
+
+app.post("/api/users/:id/territories", auth, requireRole("master"), async (req, res) => {
+  const { id } = req.params;
+  const { territory } = req.body;
+  if (!territory || !territory.trim()) return res.status(400).json({ error: "Укажите территорию" });
+  const check = await pool.query("select role from users where id=$1", [id]);
+  if (!check.rows[0] || check.rows[0].role !== "rm") return res.status(400).json({ error: "Это не аккаунт РМ" });
+  try {
+    const { rows } = await pool.query("insert into rm_territories (rm_id, territory) values ($1,$2) returning *", [id, territory.trim()]);
+    res.json(rows[0]);
+  } catch (e) {
+    if (e.code === "23505") return res.status(409).json({ error: "Эта территория уже добавлена" });
+    throw e;
+  }
+});
+
+app.delete("/api/users/:id/territories/:territoryId", auth, requireRole("master"), async (req, res) => {
+  const { id, territoryId } = req.params;
+  await pool.query("delete from rm_territories where id=$1 and rm_id=$2", [territoryId, id]);
+  res.json({ ok: true });
+});
+
 app.delete("/api/users/:id", auth, requireRole("master"), async (req, res) => {
   const { id } = req.params;
   if (String(id) === String(req.user.id)) return res.status(400).json({ error: "Нельзя удалить собственный аккаунт" });
