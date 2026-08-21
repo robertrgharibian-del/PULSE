@@ -1440,11 +1440,17 @@ app.post("/api/import/fss", auth, requireRole("master"), upload.single("file"), 
   }
 
   const summary = { mp_updated: mpUpdated, unmatched_products: unmatchedProducts, missing_areas: missingAreas, no_mp_for_territory: noMpForTerritory };
-  const logRes = await pool.query(
-    "insert into import_log (import_type, period_year, period_month, uploaded_by, summary, changes) values ('fss',$1,$2,$3,$4,$5) returning id",
-    [year, month, req.user.id, summary, changes]
-  );
-  res.json({ ...summary, import_id: logRes.rows[0].id });
+  let importId = null;
+  try {
+    const logRes = await pool.query(
+      "insert into import_log (import_type, period_year, period_month, uploaded_by, summary, changes) values ('fss',$1,$2,$3,$4,$5) returning id",
+      [year, month, req.user.id, summary, changes]
+    );
+    importId = logRes.rows[0].id;
+  } catch (e) {
+    console.error("import_log insert failed (FSS import itself already succeeded):", e.message);
+  }
+  res.json({ ...summary, import_id: importId });
 });
 
 app.post("/api/import/targets", auth, requireRole("master"), upload.single("file"), async (req, res) => {
@@ -1486,11 +1492,17 @@ app.post("/api/import/targets", auth, requireRole("master"), upload.single("file
   }
 
   const summary = { mp_updated: mpUpdated, unmatched_products: unmatchedProducts, missing_sheets: missingSheets, no_mp_for_territory: noMpForTerritory };
-  const logRes = await pool.query(
-    "insert into import_log (import_type, period_year, uploaded_by, summary, changes) values ('targets',$1,$2,$3,$4) returning id",
-    [1999 + Number(fy), req.user.id, summary, changes]
-  );
-  res.json({ ...summary, import_id: logRes.rows[0].id });
+  let importId = null;
+  try {
+    const logRes = await pool.query(
+      "insert into import_log (import_type, period_year, uploaded_by, summary, changes) values ('targets',$1,$2,$3,$4) returning id",
+      [1999 + Number(fy), req.user.id, summary, changes]
+    );
+    importId = logRes.rows[0].id;
+  } catch (e) {
+    console.error("import_log insert failed (targets import itself already succeeded):", e.message);
+  }
+  res.json({ ...summary, import_id: importId });
 });
 
 /* ---- Import history: list + undo ---- */
