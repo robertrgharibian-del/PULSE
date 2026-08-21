@@ -274,6 +274,8 @@ export const translations = {
     "users.rm_territories": "Территории под управлением РМ",
     "users.rm_territories_empty": "Пока не добавлено ни одной территории",
     "users.rm_territories_placeholder": "Название территории",
+    "users.new_territory": "Новая",
+    "users.new_territory_placeholder": "Название новой территории",
 
     "brands.title": "Бренды",
     "brands.subtitle": "Объединяйте SKU в бренды и привязывайте бренд к команде",
@@ -572,6 +574,8 @@ export const translations = {
     "users.rm_territories": "RM boshqaradigan hududlar",
     "users.rm_territories_empty": "Hozircha birorta hudud qo'shilmagan",
     "users.rm_territories_placeholder": "Hudud nomi",
+    "users.new_territory": "Yangi",
+    "users.new_territory_placeholder": "Yangi hudud nomi",
 
     "brands.title": "Brendlar",
     "brands.subtitle": "SKUlarni brendlarga birlashtiring va brendni jamoaga bog'lang",

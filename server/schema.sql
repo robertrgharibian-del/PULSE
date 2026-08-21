@@ -242,6 +242,13 @@ create table if not exists rm_territories (
 );
 create index if not exists idx_rm_territories_rm on rm_territories(rm_id);
 
+-- migration 020 (kept in sync here for fresh installs — see migration_020.sql for existing DBs)
+create table if not exists custom_territories (
+  id         bigserial primary key,
+  label      text not null unique,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists development_plans (
   id            bigserial primary key,
   mp_id         bigint not null references users(id) on delete cascade,

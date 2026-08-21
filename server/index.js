@@ -272,8 +272,10 @@ app.post("/api/users", auth, requireRole("master"), async (req, res) => {
   if (!email || !password || !full_name || !role) return res.status(400).json({ error: "Заполните все обязательные поля" });
   if (!["rm", "mp", "bm"].includes(role)) return res.status(400).json({ error: "Недопустимая роль" });
   if (role === "mp" && !rm_id) return res.status(400).json({ error: "Для медпреда обязательно нужно указать РМ" });
-  if (role === "mp" && !TERRITORIES.some((t) => t.label === territory)) {
-    return res.status(400).json({ error: "Выберите территорию из списка" });
+  if (role === "mp") {
+    const isBuiltin = TERRITORIES.some((t) => t.label === territory);
+    const isCustom = !isBuiltin && (await pool.query("select 1 from custom_territories where label=$1", [territory])).rows.length > 0;
+    if (!isBuiltin && !isCustom) return res.status(400).json({ error: "Выберите территорию из списка" });
   }
   if ((role === "mp" || role === "bm") && !group_id) {
     return res.status(400).json({ error: "Укажите группу (портфолио)" });
@@ -458,7 +460,26 @@ app.get("/api/products", auth, async (req, res) => {
    TERRITORIES — fixed catalog used for MP account creation and imports
    ============================================================ */
 app.get("/api/territories", auth, async (req, res) => {
-  res.json(TERRITORIES.map((t) => ({ key: t.key, label: t.label })));
+  const custom = await pool.query("select id, label from custom_territories order by label");
+  const builtin = TERRITORIES.map((t) => ({ key: t.key, label: t.label }));
+  const customMapped = custom.rows.map((t) => ({ key: `custom_${t.id}`, label: t.label }));
+  res.json([...builtin, ...customMapped]);
+});
+
+app.post("/api/territories", auth, requireRole("master"), async (req, res) => {
+  const { label } = req.body;
+  if (!label || !label.trim()) return res.status(400).json({ error: "Укажите название территории" });
+  const trimmed = label.trim();
+  if (TERRITORIES.some((t) => t.label.toLowerCase() === trimmed.toLowerCase())) {
+    return res.status(409).json({ error: "Такая территория уже есть во встроенном списке" });
+  }
+  try {
+    const { rows } = await pool.query("insert into custom_territories (label) values ($1) returning *", [trimmed]);
+    res.json({ key: `custom_${rows[0].id}`, label: rows[0].label });
+  } catch (e) {
+    if (e.code === "23505") return res.status(409).json({ error: "Такая территория уже добавлена" });
+    throw e;
+  }
 });
 
 /* ============================================================

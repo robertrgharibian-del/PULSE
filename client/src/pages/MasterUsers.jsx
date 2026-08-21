@@ -44,24 +44,80 @@ function GroupManager({ groups, onCreated }) {
   );
 }
 
-function CreateUserForm({ rms, territories, groups, onCreated }) {
+function TerritoryPicker({ value, onChange, territories, onTerritoryAdded, t }) {
+  const [addingNew, setAddingNew] = useState(false);
+  const [newLabel, setNewLabel] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function addNew() {
+    if (!newLabel.trim()) return;
+    setBusy(true); setError("");
+    try {
+      const created = await api.createTerritory(newLabel.trim());
+      await onTerritoryAdded();
+      onChange(created.label);
+      setNewLabel(""); setAddingNew(false);
+    } catch (e) { setError(e.message); } finally { setBusy(false); }
+  }
+
+  if (addingNew) {
+    return (
+      <div className="flex flex-col gap-1">
+        <div className="flex gap-2">
+          <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder={t("users.new_territory_placeholder")}
+            className="bg-transparent border rounded px-2 py-1.5 text-sm flex-1" style={{ borderColor: "#D3D8E4" }} />
+          <button type="button" onClick={addNew} disabled={busy} className="px-3 py-1.5 rounded text-xs font-semibold" style={{ background: "#16A34A", color: "#FFFFFF" }}>{t("common.add")}</button>
+          <button type="button" onClick={() => setAddingNew(false)} className="px-2 py-1.5 rounded text-xs" style={{ background: "#E4E7F0" }}>✕</button>
+        </div>
+        {error && <div className="text-xs" style={{ color: "#DC2626" }}>{error}</div>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex gap-2">
+      <select value={value} onChange={(e) => onChange(e.target.value)} className="bg-transparent border rounded px-2 py-1.5 text-sm flex-1" style={{ borderColor: "#D3D8E4" }}>
+        <option value="" style={{ color: "#000" }}>{t("users.select_territory")}</option>
+        {territories.map((t2) => <option key={t2.key} value={t2.label} style={{ color: "#000" }}>{t2.label}</option>)}
+      </select>
+      <button type="button" onClick={() => setAddingNew(true)} className="px-2 py-1.5 rounded text-xs whitespace-nowrap" style={{ background: "#E4E7F0" }}>+ {t("users.new_territory")}</button>
+    </div>
+  );
+}
+
+function CreateUserForm({ rms, territories, groups, onCreated, onTerritoryAdded }) {
   const { t } = useLanguage();
   const [role, setRole] = useState("mp");
   const [form, setForm] = useState({ email: "", password: "", full_name: "", territory: "", rm_id: "", group_id: "" });
+  const [rmTerritories, setRmTerritories] = useState([]);
+  const [pickedTerritory, setPickedTerritory] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  function addRmTerritoryStaged() {
+    if (!pickedTerritory || rmTerritories.includes(pickedTerritory)) return;
+    setRmTerritories((r) => [...r, pickedTerritory]);
+    setPickedTerritory("");
+  }
 
   async function submit(e) {
     e.preventDefault();
     setError(""); setBusy(true);
     try {
-      await api.createUser({
+      const created = await api.createUser({
         ...form, role,
         rm_id: role === "mp" ? form.rm_id : undefined,
         territory: role === "mp" ? form.territory : undefined,
         group_id: (role === "mp" || role === "bm") ? form.group_id : undefined,
       });
+      if (role === "rm" && rmTerritories.length && created?.id) {
+        for (const territory of rmTerritories) {
+          await api.addRmTerritory(created.id, territory);
+        }
+      }
       setForm({ email: "", password: "", full_name: "", territory: "", rm_id: "", group_id: "" });
+      setRmTerritories([]);
       onCreated();
     } catch (e2) { setError(e2.message); } finally { setBusy(false); }
   }
@@ -86,11 +142,7 @@ function CreateUserForm({ rms, territories, groups, onCreated }) {
         <input required type="password" placeholder={t("common.password")} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}
           className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }} />
         {role === "mp" && (
-          <select required value={form.territory} onChange={(e) => setForm({ ...form, territory: e.target.value })}
-            className="bg-transparent border rounded px-3 py-2" style={{ borderColor: "#D3D8E4" }}>
-            <option value="" style={{ color: "#000" }}>{t("users.select_territory")}</option>
-            {territories.map((t2) => <option key={t2.key} value={t2.label} style={{ color: "#000" }}>{t2.label}</option>)}
-          </select>
+          <TerritoryPicker value={form.territory} onChange={(v) => setForm({ ...form, territory: v })} territories={territories} onTerritoryAdded={onTerritoryAdded} t={t} />
         )}
         {(role === "mp" || role === "bm") && (
           <select required value={form.group_id} onChange={(e) => setForm({ ...form, group_id: e.target.value })}
@@ -105,6 +157,23 @@ function CreateUserForm({ rms, territories, groups, onCreated }) {
             <option value="" style={{ color: "#000" }}>{t("users.select_rm")}</option>
             {rms.map((rm) => <option key={rm.id} value={rm.id} style={{ color: "#000" }}>{rm.full_name} ({rm.territory || "—"})</option>)}
           </select>
+        )}
+        {role === "rm" && (
+          <div className="sm:col-span-2">
+            <div className="text-xs mb-1" style={{ color: "#6B7280" }}>{t("users.rm_territories")}</div>
+            <div className="flex flex-wrap gap-2 mb-2">
+              {rmTerritories.map((terr) => (
+                <span key={terr} className="px-2 py-1 rounded-full text-xs flex items-center gap-1" style={{ background: "#E4E7F0" }}>
+                  {terr}
+                  <button type="button" onClick={() => setRmTerritories((r) => r.filter((x) => x !== terr))} style={{ color: "#DC2626" }}>✕</button>
+                </span>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <TerritoryPicker value={pickedTerritory} onChange={setPickedTerritory} territories={territories.filter((t2) => !rmTerritories.includes(t2.label))} onTerritoryAdded={onTerritoryAdded} t={t} />
+              <button type="button" onClick={addRmTerritoryStaged} disabled={!pickedTerritory} className="px-3 py-1.5 rounded text-xs font-semibold shrink-0" style={{ background: "#16A34A", color: "#FFFFFF" }}>+ {t("common.add")}</button>
+            </div>
+          </div>
         )}
       </div>
       {error && <div className="text-sm mt-3" style={{ color: "#DC2626" }}>{error}</div>}
@@ -154,9 +223,9 @@ function ResetRequests({ onResolved }) {
   );
 }
 
-function RmTerritoryManager({ rmId, t }) {
+function RmTerritoryManager({ rmId, territories, onTerritoryAdded, t }) {
   const [items, setItems] = useState([]);
-  const [newTerritory, setNewTerritory] = useState("");
+  const [picked, setPicked] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -164,9 +233,9 @@ function RmTerritoryManager({ rmId, t }) {
   useEffect(() => { load(); }, [rmId]);
 
   async function add() {
-    if (!newTerritory.trim()) return;
+    if (!picked) return;
     setBusy(true); setError("");
-    try { await api.addRmTerritory(rmId, newTerritory.trim()); setNewTerritory(""); await load(); }
+    try { await api.addRmTerritory(rmId, picked); setPicked(""); await load(); }
     catch (e) { setError(e.message); } finally { setBusy(false); }
   }
 
@@ -175,6 +244,9 @@ function RmTerritoryManager({ rmId, t }) {
     try { await api.removeRmTerritory(rmId, id); await load(); }
     catch (e) { setError(e.message); } finally { setBusy(false); }
   }
+
+  const already = new Set(items.map((it) => it.territory));
+  const selectable = territories.filter((t2) => !already.has(t2.label));
 
   return (
     <div className="sm:col-span-2">
@@ -189,17 +261,15 @@ function RmTerritoryManager({ rmId, t }) {
         {items.length === 0 && <span className="text-xs" style={{ color: "#9CA3AF" }}>{t("users.rm_territories_empty")}</span>}
       </div>
       <div className="flex gap-2">
-        <input value={newTerritory} onChange={(e) => setNewTerritory(e.target.value)} placeholder={t("users.rm_territories_placeholder")}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
-          className="bg-transparent border rounded px-2 py-1.5 text-sm flex-1" style={{ borderColor: "#D3D8E4" }} />
-        <button onClick={add} disabled={busy} className="px-3 py-1.5 rounded text-xs font-semibold" style={{ background: "#16A34A", color: "#FFFFFF" }}>+ {t("common.add")}</button>
+        <TerritoryPicker value={picked} onChange={setPicked} territories={selectable} onTerritoryAdded={onTerritoryAdded} t={t} />
+        <button onClick={add} disabled={busy || !picked} className="px-3 py-1.5 rounded text-xs font-semibold shrink-0" style={{ background: "#16A34A", color: "#FFFFFF" }}>+ {t("common.add")}</button>
       </div>
       {error && <div className="text-xs mt-1" style={{ color: "#DC2626" }}>{error}</div>}
     </div>
   );
 }
 
-function EditUserRow({ u, rms, territories, groups, onSaved }) {
+function EditUserRow({ u, rms, territories, groups, onSaved, onTerritoryAdded }) {
   const { t } = useLanguage();
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
@@ -275,9 +345,7 @@ function EditUserRow({ u, rms, territories, groups, onSaved }) {
             {u.role === "mp" && (
               <label className="flex flex-col gap-1">
                 <span className="text-xs" style={{ color: "#6B7280" }}>{t("common.territory")}</span>
-                <select value={form.territory} onChange={(e) => setForm({ ...form, territory: e.target.value })} className="bg-transparent border rounded px-2 py-1.5" style={{ borderColor: "#D3D8E4" }}>
-                  {territories.map((t2) => <option key={t2.key} value={t2.label} style={{ color: "#000" }}>{t2.label}</option>)}
-                </select>
+                <TerritoryPicker value={form.territory} onChange={(v) => setForm({ ...form, territory: v })} territories={territories} onTerritoryAdded={onTerritoryAdded} t={t} />
               </label>
             )}
             {(u.role === "mp" || u.role === "bm") && (
@@ -297,7 +365,7 @@ function EditUserRow({ u, rms, territories, groups, onSaved }) {
                 </select>
               </label>
             )}
-            {u.role === "rm" && <RmTerritoryManager rmId={u.id} t={t} />}
+            {u.role === "rm" && <RmTerritoryManager rmId={u.id} territories={territories} onTerritoryAdded={onTerritoryAdded} t={t} />}
           </div>
           {error && <div className="text-xs mb-2" style={{ color: "#DC2626" }}>{error}</div>}
           <div className="flex gap-2">
@@ -397,7 +465,7 @@ export default function MasterUsers() {
         <>
           <ResetRequests onResolved={loadAll} />
           <GroupManager groups={groups} onCreated={loadAll} />
-          <CreateUserForm rms={rms} territories={territories} groups={groups} onCreated={loadAll} />
+          <CreateUserForm rms={rms} territories={territories} groups={groups} onCreated={loadAll} onTerritoryAdded={loadAll} />
         </>
       )}
 
@@ -416,7 +484,7 @@ export default function MasterUsers() {
           </thead>
           <tbody>
             {sortedUsers.map((u) => (
-              <EditUserRow key={u.id} u={u} rms={rms} territories={territories} groups={groups} onSaved={loadAll} />
+              <EditUserRow key={u.id} u={u} rms={rms} territories={territories} groups={groups} onSaved={loadAll} onTerritoryAdded={loadAll} />
             ))}
           </tbody>
         </table>

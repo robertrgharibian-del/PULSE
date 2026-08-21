@@ -47,6 +47,7 @@ export const api = {
 
   listRms: () => request("/api/users/rms"),
   listTerritories: () => request("/api/territories"),
+  createTerritory: (label) => request("/api/territories", { method: "POST", body: { label } }),
   listUsers: (archived) => request(`/api/users${archived ? "?archived=true" : ""}`),
   deleteUserPermanent: (id) => request(`/api/users/${id}/permanent`, { method: "DELETE" }),
   listGroups: (archived) => request(`/api/groups${archived ? "?archived=true" : ""}`),
