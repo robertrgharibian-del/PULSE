@@ -280,6 +280,10 @@ export const translations = {
     "brands.sku_count": "SKU",
     "brands.move_sku": "Переместить в бренд",
     "brands.confirm_delete": "Удалить бренд «{{name}}»? SKU внутри него не удалятся, просто останутся без привязки к бренду.",
+    "brands.empty_brand": "В этом бренде пока нет SKU",
+    "brands.add_existing_sku": "Добавить существующий SKU",
+    "brands.remove_from_brand": "Убрать из бренда",
+    "brands.no_more_sku": "Все SKU этой команды уже в этом бренде",
 
     "login.title": "PULSE",
     "login.email": "Email",
@@ -570,6 +574,10 @@ export const translations = {
     "brands.sku_count": "SKU",
     "brands.move_sku": "Brendga ko'chirish",
     "brands.confirm_delete": "«{{name}}» brendini o'chirasizmi? Undagi SKUlar o'chirilmaydi, faqat brendga bog'lanmagan holda qoladi.",
+    "brands.empty_brand": "Bu brendda hozircha SKU yo'q",
+    "brands.add_existing_sku": "Mavjud SKU qo'shish",
+    "brands.remove_from_brand": "Brenddan chiqarish",
+    "brands.no_more_sku": "Bu jamoaning barcha SKUlari allaqachon bu brendda",
 
     "login.title": "PULSE",
     "login.email": "Email",
