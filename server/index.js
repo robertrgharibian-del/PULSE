@@ -1723,6 +1723,47 @@ app.post("/api/import/:id/undo", auth, requireRole("master"), async (req, res) =
   res.json({ ok: true, reverted_cells: changes.length });
 });
 
+app.delete("/api/import/:id", auth, requireRole("master"), async (req, res) => {
+  const { id } = req.params;
+  const check = await pool.query("select id from import_log where id=$1", [id]);
+  if (!check.rows[0]) return res.status(404).json({ error: "Импорт не найден" });
+  // Clear the "superseded_by" pointer on any older entry that referenced this one,
+  // so deleting a record never leaves a dangling reference behind.
+  await pool.query("update import_log set superseded_by=null where superseded_by=$1", [id]);
+  await pool.query("delete from import_log where id=$1", [id]);
+  res.json({ ok: true });
+});
+
+/* Tile-friendly status: the single currently-active targets import (if any),
+   and one FSS status slot per month of the given year. "Active" means not
+   reverted and not superseded — i.e. genuinely the current source of truth. */
+app.get("/api/import/status", auth, requireRole("master"), async (req, res) => {
+  const year = Number(req.query.year) || new Date().getFullYear();
+
+  const targetsRes = await pool.query(
+    `select l.id, l.period_year, l.summary, l.created_at, u.full_name as uploaded_by_name
+     from import_log l join users u on u.id=l.uploaded_by
+     where l.import_type='targets' and l.reverted=false and l.superseded_by is null
+     order by l.created_at desc`
+  );
+
+  const fssRes = await pool.query(
+    `select l.id, l.period_year, l.period_month, l.summary, l.created_at, u.full_name as uploaded_by_name
+     from import_log l join users u on u.id=l.uploaded_by
+     where l.import_type='fss' and l.period_year=$1 and l.reverted=false and l.superseded_by is null
+     order by l.period_month`,
+    [year]
+  );
+  const fssByMonth = {};
+  for (const r of fssRes.rows) fssByMonth[r.period_month] = r;
+
+  res.json({
+    targets: targetsRes.rows,
+    fss_year: year,
+    fss_by_month: fssByMonth,
+  });
+});
+
 /* ============================================================
    REPORTS — list (role-scoped)
    ============================================================ */

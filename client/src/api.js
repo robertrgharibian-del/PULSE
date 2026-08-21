@@ -176,7 +176,9 @@ export const api = {
   },
   dashboard: () => request("/api/dashboard"),
   importHistory: () => request("/api/import/history"),
+  importStatus: (year) => request(`/api/import/status?year=${year}`),
   undoImport: (id) => request(`/api/import/${id}/undo`, { method: "POST" }),
+  deleteImport: (id) => request(`/api/import/${id}`, { method: "DELETE" }),
   passwordResets: () => request("/api/password-resets"),
   resolveReset: (userId, password) => request(`/api/users/${userId}`, { method: "PATCH", body: { password } }),
 

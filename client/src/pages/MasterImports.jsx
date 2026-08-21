@@ -32,49 +32,6 @@ function ResultBox({ result }) {
   );
 }
 
-function ImportHistory({ refreshKey }) {
-  const [history, setHistory] = useState(null);
-  const [busyId, setBusyId] = useState(null);
-
-  async function load() { setHistory(await api.importHistory()); }
-  useEffect(() => { load(); }, [refreshKey]);
-
-  async function undo(id) {
-    if (!confirm("Отменить эту загрузку? Значения вернутся к тем, что были до неё.")) return;
-    setBusyId(id);
-    try { await api.undoImport(id); await load(); }
-    catch (e) { alert(e.message); }
-    finally { setBusyId(null); }
-  }
-
-  if (!history) return null;
-  return (
-    <div className="rounded-2xl p-4 sm:p-5" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
-      <div className="font-display text-lg mb-3">История загрузок</div>
-      {history.length === 0 && <div className="text-sm" style={{ color: "#6B7280" }}>Загрузок пока не было</div>}
-      <div className="space-y-2">
-        {history.map((h) => (
-          <div key={h.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg p-3 text-sm" style={{ background: "#EEF1F8", opacity: (h.reverted || h.superseded_by) ? 0.6 : 1 }}>
-            <div>
-              <b>{h.import_type === "fss" ? "FSS продажи" : "Таргеты"}</b>
-              {" "}· {h.import_type === "fss" ? `${h.period_month}/${h.period_year}` : `FY${h.period_year - 1999}`}
-              {" "}· {h.uploaded_by_name} · {new Date(h.created_at).toLocaleString("ru-RU")}
-              {h.reverted && <span style={{ color: "#DC2626" }}> · отменено</span>}
-              {!h.reverted && h.superseded_by && <span style={{ color: "#6B7280" }}> · заменено новой загрузкой</span>}
-              <div style={{ color: "#6B7280" }}>Обновлено МП: {h.summary?.mp_updated ?? "—"}</div>
-            </div>
-            {!h.reverted && !h.superseded_by && (
-              <button onClick={() => undo(h.id)} disabled={busyId === h.id} className="px-3 py-1.5 rounded text-xs" style={{ background: "#DC262622", color: "#DC2626" }}>
-                Отменить загрузку
-              </button>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function ProgressBar({ progress, phase }) {
   if (!phase) return null;
   return (
@@ -98,6 +55,108 @@ function ProgressBar({ progress, phase }) {
   );
 }
 
+function ActiveImportRow({ entry, onDeleted }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function del() {
+    if (!confirm("Полностью удалить этот файл загрузки? После удаления плитка станет пустой, и можно будет загрузить новый файл. Ранее занесённые данные (продажи/таргеты) останутся как есть, пока вы не загрузите новый файл поверх них.")) return;
+    setBusy(true); setError("");
+    try { await api.deleteImport(entry.id); onDeleted(); }
+    catch (e) { setError(e.message); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="rounded-lg p-3 text-sm" style={{ background: "#FFFFFF", border: "1px solid #E4E7F0" }}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div style={{ color: "#6B7280" }}>{entry.uploaded_by_name} · {new Date(entry.created_at).toLocaleString("ru-RU")}</div>
+          <div style={{ color: "#6B7280" }}>Обновлено МП: {entry.summary?.mp_updated ?? "—"}</div>
+        </div>
+        <button onClick={del} disabled={busy} className="px-3 py-1.5 rounded text-xs font-semibold" style={{ background: "#DC262622", color: "#DC2626" }}>
+          {busy ? "…" : "Удалить файл"}
+        </button>
+      </div>
+      {error && <div className="text-xs mt-2" style={{ color: "#DC2626" }}>{error}</div>}
+    </div>
+  );
+}
+
+function TargetsTile({ activeList, onDeleted }) {
+  const [open, setOpen] = useState(false);
+  const hasActive = activeList.length > 0;
+
+  return (
+    <div className="rounded-2xl overflow-hidden" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
+      <button onClick={() => setOpen((v) => !v)} className="w-full text-left p-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="font-display text-lg font-semibold">Таргет</span>
+          {hasActive && <span style={{ color: "#16A34A" }}>✓</span>}
+        </div>
+        <span style={{ color: "#6B7280" }}>{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div className="px-4 pb-4">
+          {hasActive ? (
+            <div className="space-y-2">
+              {activeList.map((entry) => (
+                <div key={entry.id}>
+                  <div className="text-xs uppercase mb-1" style={{ color: "#6B7280" }}>FY{entry.period_year - 1999}</div>
+                  <ActiveImportRow entry={entry} onDeleted={onDeleted} />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-sm" style={{ color: "#6B7280" }}>Файл ещё не загружен</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MonthTile({ monthIndex, entry, onDeleted }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-2xl overflow-hidden" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
+      <button onClick={() => setOpen((v) => !v)} className="w-full text-left p-3 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="font-semibold text-sm">{MONTHS[monthIndex]}</span>
+          {entry && <span style={{ color: "#16A34A" }}>✓</span>}
+        </div>
+        <span className="text-xs" style={{ color: "#6B7280" }}>{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div className="px-3 pb-3">
+          {entry ? <ActiveImportRow entry={entry} onDeleted={onDeleted} /> : <div className="text-xs" style={{ color: "#6B7280" }}>Файл ещё не загружен</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ImportStatusTiles({ refreshKey, year }) {
+  const [status, setStatus] = useState(null);
+
+  async function load() { setStatus(await api.importStatus(year)); }
+  useEffect(() => { load(); }, [refreshKey, year]);
+
+  if (!status) return null;
+  return (
+    <div className="space-y-4">
+      <TargetsTile activeList={status.targets} onDeleted={load} />
+      <div>
+        <div className="text-sm font-semibold mb-2" style={{ color: "#374151" }}>FSS продажи по месяцам, {year}</div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {MONTHS.map((_, i) => (
+            <MonthTile key={i} monthIndex={i} entry={status.fss_by_month[i + 1] || null} onDeleted={load} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function MasterImports() {
   const now = new Date();
   const [fssYear, setFssYear] = useState(now.getFullYear());
@@ -117,6 +176,7 @@ export default function MasterImports() {
   const [tgtProgress, setTgtProgress] = useState(0);
   const [tgtPhase, setTgtPhase] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [statusYear, setStatusYear] = useState(now.getFullYear());
 
   async function uploadFss() {
     if (!fssFile) { setFssError("Выберите файл"); return; }
@@ -128,6 +188,7 @@ export default function MasterImports() {
       });
       setFssPhase("done");
       setFssResult(result);
+      setStatusYear(fssYear);
       setRefreshKey((k) => k + 1);
     } catch (e) { setFssError(e.message); setFssPhase(null); } finally { setFssBusy(false); }
   }
@@ -198,7 +259,16 @@ export default function MasterImports() {
         <ResultBox result={tgtResult} />
       </div>
 
-      <ImportHistory refreshKey={refreshKey} />
+      <div>
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div className="font-display text-lg">Статус загрузок</div>
+          <label className="flex items-center gap-2 text-sm">
+            <span style={{ color: "#6B7280" }}>Год</span>
+            <input type="number" value={statusYear} onChange={(e) => setStatusYear(Number(e.target.value))} className="bg-transparent border rounded px-2 py-1 w-24" style={{ borderColor: "#D3D8E4" }} />
+          </label>
+        </div>
+        <ImportStatusTiles refreshKey={refreshKey} year={statusYear} />
+      </div>
     </div>
   );
 }
