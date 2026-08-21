@@ -18,12 +18,20 @@ function GroupManager({ groups, onCreated }) {
     catch (e) { setError(e.message); } finally { setBusy(false); }
   }
 
+  async function remove(g) {
+    if (!confirm(t("users.confirm_delete_group", { name: g.name }))) return;
+    try { await api.deleteGroup(g.id); onCreated(); } catch (e) { setError(e.message); }
+  }
+
   return (
     <div className="rounded-2xl p-4 sm:p-5 mb-6" style={{ background: "#F7F8FC", border: "1px solid #E4E7F0" }}>
       <div className="font-display text-lg mb-3">{t("users.groups_title")}</div>
       <div className="flex flex-wrap gap-2 mb-3">
         {groups.map((g) => (
-          <span key={g.id} className="px-3 py-1.5 rounded-full text-sm" style={{ background: "#E4E7F0" }}>{g.name}</span>
+          <span key={g.id} className="px-3 py-1.5 rounded-full text-sm flex items-center gap-2" style={{ background: "#E4E7F0" }}>
+            {g.name}
+            <button onClick={() => remove(g)} className="text-xs" style={{ color: "#DC2626" }} title={t("common.delete")}>✕</button>
+          </span>
         ))}
       </div>
       <div className="flex gap-2">
@@ -183,6 +191,14 @@ function EditUserRow({ u, rms, territories, groups, onSaved }) {
     }
   }
 
+  async function permanentDelete() {
+    if (!confirm(t("users.confirm_permanent_1", { name: u.full_name }))) return;
+    const expectedWord = t("users.confirm_word");
+    if (prompt(t("users.confirm_permanent_2", { word: expectedWord })) !== expectedWord) { alert(t("users.confirm_permanent_cancelled")); return; }
+    setBusy(true);
+    try { await api.deleteUserPermanent(u.id); onSaved(); } catch (e) { setError(e.message); } finally { setBusy(false); }
+  }
+
   async function uploadPhoto(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -268,10 +284,15 @@ function EditUserRow({ u, rms, territories, groups, onSaved }) {
         </label>
         {u.role !== "master" && (
           <>
-            <button onClick={() => setEditing(true)} className="text-xs mr-3" style={{ color: "#ED3237" }}>{t("common.change")}</button>
-            <button onClick={toggleActive} disabled={busy} className="text-xs" style={{ color: u.is_active ? "#DC2626" : "#16A34A" }}>
+            {u.is_active && <button onClick={() => setEditing(true)} className="text-xs mr-3" style={{ color: "#ED3237" }}>{t("common.change")}</button>}
+            <button onClick={toggleActive} disabled={busy} className="text-xs mr-3" style={{ color: u.is_active ? "#DC2626" : "#16A34A" }}>
               {u.is_active ? t("common.delete") : t("common.restore")}
             </button>
+            {!u.is_active && (
+              <button onClick={permanentDelete} disabled={busy} className="text-xs font-semibold" style={{ color: "#DC2626" }}>
+                {t("users.permanent_delete")}
+              </button>
+            )}
           </>
         )}
       </td>
@@ -287,14 +308,15 @@ export default function MasterUsers() {
   const [groups, setGroups] = useState([]);
   const [sortKey, setSortKey] = useState(null);
   const [sortDir, setSortDir] = useState("asc");
+  const [showArchive, setShowArchive] = useState(false);
 
   async function loadAll() {
-    setUsers(await api.listUsers());
+    setUsers(await api.listUsers(showArchive));
     setRms(await api.listRms());
     setTerritories(await api.listTerritories());
     setGroups(await api.listGroups());
   }
-  useEffect(() => { loadAll(); }, []);
+  useEffect(() => { loadAll(); }, [showArchive]);
 
   function toggleSort(key) {
     if (sortKey === key) { setSortDir((d) => (d === "asc" ? "desc" : "asc")); }
@@ -317,12 +339,21 @@ export default function MasterUsers() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-5 py-8">
-      <div className="font-display text-2xl font-semibold mb-1">{t("nav.users")}</div>
-      <div className="text-sm mb-6" style={{ color: "#6B7280" }}>{t("users.subtitle")}</div>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
+        <div className="font-display text-2xl font-semibold">{t("nav.users")}</div>
+        <button onClick={() => setShowArchive((v) => !v)} className="px-4 py-2 rounded text-sm font-semibold" style={{ background: showArchive ? "#ED3237" : "#E4E7F0", color: showArchive ? "#FFFFFF" : "#374151" }}>
+          {showArchive ? t("users.back_to_active") : t("users.show_archive")}
+        </button>
+      </div>
+      <div className="text-sm mb-6" style={{ color: "#6B7280" }}>{showArchive ? t("users.archive_subtitle") : t("users.subtitle")}</div>
 
-      <ResetRequests onResolved={loadAll} />
-      <GroupManager groups={groups} onCreated={loadAll} />
-      <CreateUserForm rms={rms} territories={territories} groups={groups} onCreated={loadAll} />
+      {!showArchive && (
+        <>
+          <ResetRequests onResolved={loadAll} />
+          <GroupManager groups={groups} onCreated={loadAll} />
+          <CreateUserForm rms={rms} territories={territories} groups={groups} onCreated={loadAll} />
+        </>
+      )}
 
       <div className="rounded-2xl overflow-x-auto" style={{ border: "1px solid #E4E7F0" }}>
         <table className="w-full text-sm">

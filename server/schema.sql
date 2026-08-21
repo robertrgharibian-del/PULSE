@@ -211,13 +211,27 @@ alter table report_potential add column if not exists actual_result_rx_per_week 
 -- migration 007 (kept in sync here for fresh installs — see migration_007.sql for existing DBs)
 create table if not exists groups (
   id    bigserial primary key,
-  name  text unique not null
+  name  text unique not null,
+  is_active boolean not null default true
 );
 insert into groups (name) values ('Rhythm'), ('Prime') on conflict (name) do nothing;
 alter table users drop constraint if exists users_role_check;
 alter table users add constraint users_role_check check (role in ('master','rm','mp','bm'));
 alter table users add column if not exists group_id bigint references groups(id);
 alter table products add column if not exists group_id bigint references groups(id);
+
+-- migration 018 (kept in sync here for fresh installs — see migration_018.sql for existing DBs)
+create table if not exists brands (
+  id         bigserial primary key,
+  name       text not null,
+  group_id   bigint references groups(id) on delete set null,
+  is_active  boolean not null default true,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_brands_group on brands(group_id);
+alter table products add column if not exists brand_id bigint references brands(id) on delete set null;
+create index if not exists idx_products_brand on products(brand_id);
+
 create table if not exists development_plans (
   id            bigserial primary key,
   mp_id         bigint not null references users(id) on delete cascade,

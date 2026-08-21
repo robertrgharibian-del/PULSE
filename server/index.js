@@ -236,10 +236,13 @@ app.get("/api/users/rms", auth, requireRole("master"), async (req, res) => {
 
 // list users (master: everyone; rm: their own MPs)
 app.get("/api/users", auth, async (req, res) => {
+  const showArchived = req.query.archived === "true";
+  const activeFilter = showArchived ? "u.is_active = false" : "u.is_active = true";
   if (req.user.role === "master") {
     const { rows } = await pool.query(
       `select u.id, u.email, u.full_name, u.role, u.territory, u.rm_id, u.group_id, u.is_active, rm.full_name as rm_name, g.name as group_name
        from users u left join users rm on rm.id = u.rm_id left join groups g on g.id = u.group_id
+       where ${activeFilter}
        order by u.role, u.full_name`
     );
     return res.json(rows);
@@ -247,7 +250,7 @@ app.get("/api/users", auth, async (req, res) => {
   if (req.user.role === "rm") {
     const { rows } = await pool.query(
       `select u.id, u.email, u.full_name, u.role, u.territory, u.group_id, u.is_active, g.name as group_name
-       from users u left join groups g on g.id = u.group_id where u.rm_id = $1 order by u.full_name`,
+       from users u left join groups g on g.id = u.group_id where u.rm_id = $1 and u.is_active = true order by u.full_name`,
       [req.user.id]
     );
     return res.json(rows);
@@ -256,7 +259,7 @@ app.get("/api/users", auth, async (req, res) => {
     const { rows } = await pool.query(
       `select u.id, u.email, u.full_name, u.role, u.territory, u.rm_id, u.group_id, u.is_active, rm.full_name as rm_name, g.name as group_name
        from users u left join users rm on rm.id = u.rm_id left join groups g on g.id = u.group_id
-       where u.group_id = $1 and u.role = 'mp' order by u.full_name`,
+       where u.group_id = $1 and u.role = 'mp' and u.is_active = true order by u.full_name`,
       [req.user.group_id]
     );
     return res.json(rows);
@@ -331,6 +334,16 @@ app.delete("/api/users/:id", auth, requireRole("master"), async (req, res) => {
   const check = await pool.query("select role from users where id=$1", [id]);
   if (!check.rows[0]) return res.status(404).json({ error: "Пользователь не найден" });
   await pool.query("update users set is_active=false where id=$1", [id]);
+  res.json({ ok: true });
+});
+
+app.delete("/api/users/:id/permanent", auth, requireRole("master"), async (req, res) => {
+  const { id } = req.params;
+  if (String(id) === String(req.user.id)) return res.status(400).json({ error: "Нельзя удалить собственный аккаунт" });
+  const check = await pool.query("select role, is_active from users where id=$1", [id]);
+  if (!check.rows[0]) return res.status(404).json({ error: "Пользователь не найден" });
+  if (check.rows[0].is_active) return res.status(400).json({ error: "Сначала переместите аккаунт в архив" });
+  await pool.query("delete from users where id=$1", [id]);
   res.json({ ok: true });
 });
 
@@ -414,7 +427,8 @@ app.get("/api/territories", auth, async (req, res) => {
    MP/BM accounts and products so BM oversight & Portfolio stay scoped.
    ============================================================ */
 app.get("/api/groups", auth, async (req, res) => {
-  const { rows } = await pool.query("select * from groups order by name");
+  const showArchived = req.query.archived === "true";
+  const { rows } = await pool.query(`select * from groups where is_active = $1 order by name`, [!showArchived]);
   res.json(rows);
 });
 
@@ -428,6 +442,92 @@ app.post("/api/groups", auth, requireRole("master"), async (req, res) => {
     if (e.code === "23505") return res.status(409).json({ error: "Такая группа уже существует" });
     throw e;
   }
+});
+
+app.delete("/api/groups/:id", auth, requireRole("master"), async (req, res) => {
+  const { id } = req.params;
+  await pool.query("update groups set is_active=false where id=$1", [id]);
+  res.json({ ok: true });
+});
+
+app.patch("/api/groups/:id", auth, requireRole("master"), async (req, res) => {
+  const { id } = req.params;
+  const { is_active, name } = req.body;
+  const fields = []; const values = []; let i = 1;
+  if (is_active !== undefined) { fields.push(`is_active = $${i++}`); values.push(is_active); }
+  if (name !== undefined && name.trim()) { fields.push(`name = $${i++}`); values.push(name.trim()); }
+  if (!fields.length) return res.status(400).json({ error: "Нет полей для обновления" });
+  values.push(id);
+  await pool.query(`update groups set ${fields.join(", ")} where id=$${i}`, values);
+  res.json({ ok: true });
+});
+
+/* ============================================================
+   BRANDS — group several SKUs under one brand (e.g. "Atorem" groups
+   Atorem 10/20/40mg). A brand can be linked to a team (Rhythm/Prime/...).
+   Master and BM (own group only) can manage brands.
+   ============================================================ */
+function brandGroupScope(user) {
+  if (user.role === "master") return { where: "1=1", values: [] };
+  if (user.role === "bm") return { where: "b.group_id = $1", values: [user.group_id] };
+  return { where: "1=0", values: [] };
+}
+
+app.get("/api/brands", auth, async (req, res) => {
+  const scope = brandGroupScope(req.user);
+  const showArchived = req.query.archived === "true";
+  const params = [...scope.values];
+  params.push(!showArchived);
+  const { rows } = await pool.query(
+    `select b.*, g.name as group_name, (select count(*) from products p where p.brand_id=b.id and p.is_active=true) as sku_count
+     from brands b left join groups g on g.id=b.group_id
+     where (${scope.where}) and b.is_active = $${params.length}
+     order by b.name`,
+    params
+  );
+  res.json(rows);
+});
+
+app.post("/api/brands", auth, requireRole("master", "bm"), async (req, res) => {
+  const { name, group_id } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: "Укажите название бренда" });
+  const finalGroupId = req.user.role === "bm" ? req.user.group_id : (group_id || null);
+  const { rows } = await pool.query(
+    "insert into brands (name, group_id) values ($1,$2) returning *",
+    [name.trim(), finalGroupId]
+  );
+  res.json(rows[0]);
+});
+
+async function canManageBrand(user, brandId) {
+  if (user.role === "master") return true;
+  if (user.role === "bm") {
+    const r = await pool.query("select group_id from brands where id=$1", [brandId]);
+    return r.rows[0]?.group_id === user.group_id;
+  }
+  return false;
+}
+
+app.put("/api/brands/:id", auth, requireRole("master", "bm"), async (req, res) => {
+  const { id } = req.params;
+  if (!(await canManageBrand(req.user, id))) return res.status(403).json({ error: "Forbidden" });
+  const { name, group_id } = req.body;
+  const fields = []; const values = []; let i = 1;
+  if (name !== undefined && name.trim()) { fields.push(`name = $${i++}`); values.push(name.trim()); }
+  if (group_id !== undefined && req.user.role === "master") { fields.push(`group_id = $${i++}`); values.push(group_id || null); }
+  if (!fields.length) return res.status(400).json({ error: "Нет полей для обновления" });
+  values.push(id);
+  await pool.query(`update brands set ${fields.join(", ")} where id=$${i}`, values);
+  res.json({ ok: true });
+});
+
+app.delete("/api/brands/:id", auth, requireRole("master", "bm"), async (req, res) => {
+  const { id } = req.params;
+  if (!(await canManageBrand(req.user, id))) return res.status(403).json({ error: "Forbidden" });
+  // Unlink SKUs first (they stay in Portfolio, just no longer grouped under this brand), then remove the brand
+  await pool.query("update products set brand_id=null where brand_id=$1", [id]);
+  await pool.query("delete from brands where id=$1", [id]);
+  res.json({ ok: true });
 });
 
 /* ============================================================
@@ -459,10 +559,10 @@ function canEditProduct(user, groupId) {
 app.get("/api/portfolio", auth, async (req, res) => {
   const scope = await portfolioScope(req.user);
   const { rows } = await pool.query(
-    `select p.id, p.name, p.nrv_usd, p.group_id, g.name as group_name,
+    `select p.id, p.name, p.nrv_usd, p.group_id, g.name as group_name, p.brand_id, b.name as brand_name,
             (select count(*) from product_files f where f.product_id=p.id and f.file_type='pil') as pil_count,
             (select count(*) from product_files f where f.product_id=p.id and f.file_type='slides') as slides_count
-     from products p left join groups g on g.id=p.group_id
+     from products p left join groups g on g.id=p.group_id left join brands b on b.id=p.brand_id
      where p.is_active=true and ${scope.where} order by p.sort_order, p.name`,
     scope.values
   );
@@ -485,7 +585,7 @@ app.get("/api/portfolio/:id", auth, async (req, res) => {
   const { id } = req.params;
   const scope = await portfolioScope(req.user, 2);
   const pRes = await pool.query(
-    `select p.*, g.name as group_name from products p left join groups g on g.id=p.group_id where p.id=$1 and p.is_active=true and (${scope.where})`,
+    `select p.*, g.name as group_name, b.name as brand_name from products p left join groups g on g.id=p.group_id left join brands b on b.id=p.brand_id where p.id=$1 and p.is_active=true and (${scope.where})`,
     [id, ...scope.values]
   );
   if (!pRes.rows[0]) return res.status(403).json({ error: "Forbidden" });
@@ -526,7 +626,7 @@ app.put("/api/portfolio/:id", auth, requireRole("master", "bm"), async (req, res
   const { id } = req.params;
   const pRes = await pool.query("select group_id from products where id=$1", [id]);
   if (!pRes.rows[0] || !canEditProduct(req.user, pRes.rows[0].group_id)) return res.status(403).json({ error: "Forbidden" });
-  const { name, key_messages, positioning, patient_portraits, nrv_usd, group_id } = req.body;
+  const { name, key_messages, positioning, patient_portraits, nrv_usd, group_id, brand_id } = req.body;
   // only master may move a product to a different group
   const newGroupId = req.user.role === "master" ? group_id : undefined;
   await pool.query(
@@ -534,6 +634,10 @@ app.put("/api/portfolio/:id", auth, requireRole("master", "bm"), async (req, res
      patient_portraits=coalesce($4,patient_portraits), nrv_usd=coalesce($5,nrv_usd), group_id=coalesce($6,group_id), updated_at=now() where id=$7`,
     [name, key_messages, positioning, patient_portraits, nrv_usd, newGroupId, id]
   );
+  // brand_id handled separately: undefined = don't touch, null/"" = explicitly unlink from any brand
+  if (brand_id !== undefined) {
+    await pool.query("update products set brand_id=$1 where id=$2", [brand_id || null, id]);
+  }
   res.json({ ok: true });
 });
 

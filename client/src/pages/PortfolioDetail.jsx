@@ -306,11 +306,12 @@ function ScientificInfoSection({ productId, items, canEdit, onChanged }) {
   );
 }
 
-export default function PortfolioDetail({ productId, user, onBack }) {
+export default function PortfolioDetail({ productId, user, brands = [], onBack }) {
   const [data, setData] = useState(null);
   const [options, setOptions] = useState({ material_types: [], audience_options: [] });
   const [name, setName] = useState("");
   const [nrvUsd, setNrvUsd] = useState("");
+  const [brandId, setBrandId] = useState("");
   const [keyMessages, setKeyMessages] = useState("");
   const [positioning, setPositioning] = useState("");
   const [patientPortraits, setPatientPortraits] = useState("");
@@ -331,6 +332,7 @@ export default function PortfolioDetail({ productId, user, onBack }) {
       setData(d);
       setName(d.product.name || "");
       setNrvUsd(String(d.product.nrv_usd ?? ""));
+      setBrandId(d.product.brand_id || "");
       setKeyMessages(d.product.key_messages || "");
       setPositioning(d.product.positioning || "");
       setPatientPortraits(d.product.patient_portraits || "");
@@ -363,7 +365,7 @@ export default function PortfolioDetail({ productId, user, onBack }) {
   async function saveContent() {
     setBusy(true); setError(""); setSaved(false);
     try {
-      await api.updatePortfolioItem(productId, { name, nrv_usd: Number(nrvUsd) || 0, key_messages: keyMessages, positioning, patient_portraits: patientPortraits });
+      await api.updatePortfolioItem(productId, { name, nrv_usd: Number(nrvUsd) || 0, key_messages: keyMessages, positioning, patient_portraits: patientPortraits, brand_id: brandId || null });
       setSaved(true);
       await load();
     } catch (e) { setError(e.message); } finally { setBusy(false); }
@@ -421,16 +423,23 @@ export default function PortfolioDetail({ productId, user, onBack }) {
           {canEdit ? (
             <>
               <input value={name} onChange={(e) => setName(e.target.value)} className="font-display text-2xl font-semibold bg-transparent border-b outline-none w-full mb-1" style={{ borderColor: "#D3D8E4" }} />
-              <div className="flex items-center gap-2 text-sm" style={{ color: "#6B7280" }}>
+              <div className="flex flex-wrap items-center gap-2 text-sm" style={{ color: "#6B7280" }}>
                 {data.product.group_name || "—"} ·
                 <span>$</span>
                 <input type="number" value={nrvUsd} onChange={(e) => setNrvUsd(e.target.value)} className="bg-transparent border-b outline-none w-20 font-mono" style={{ borderColor: "#D3D8E4" }} />
+                <span>·</span>
+                <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="bg-transparent border-b outline-none text-sm" style={{ borderColor: "#D3D8E4" }}>
+                  <option value="" style={{ color: "#000" }}>Без бренда</option>
+                  {brands.filter((b) => !b.group_id || b.group_id === data.product.group_id).map((b) => (
+                    <option key={b.id} value={b.id} style={{ color: "#000" }}>{b.name}</option>
+                  ))}
+                </select>
               </div>
             </>
           ) : (
             <>
               <div className="font-display text-2xl font-semibold">{data.product.name}</div>
-              <div className="text-sm" style={{ color: "#6B7280" }}>{data.product.group_name || "—"} · ${Number(data.product.nrv_usd).toFixed(2)}</div>
+              <div className="text-sm" style={{ color: "#6B7280" }}>{data.product.group_name || "—"}{data.product.brand_name ? ` · ${data.product.brand_name}` : ""} · ${Number(data.product.nrv_usd).toFixed(2)}</div>
             </>
           )}
         </div>
