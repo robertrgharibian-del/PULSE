@@ -54,15 +54,16 @@ function ImportHistory({ refreshKey }) {
       {history.length === 0 && <div className="text-sm" style={{ color: "#6B7280" }}>Загрузок пока не было</div>}
       <div className="space-y-2">
         {history.map((h) => (
-          <div key={h.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg p-3 text-sm" style={{ background: "#EEF1F8", opacity: h.reverted ? 0.5 : 1 }}>
+          <div key={h.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg p-3 text-sm" style={{ background: "#EEF1F8", opacity: (h.reverted || h.superseded_by) ? 0.6 : 1 }}>
             <div>
               <b>{h.import_type === "fss" ? "FSS продажи" : "Таргеты"}</b>
               {" "}· {h.import_type === "fss" ? `${h.period_month}/${h.period_year}` : `FY${h.period_year - 1999}`}
               {" "}· {h.uploaded_by_name} · {new Date(h.created_at).toLocaleString("ru-RU")}
               {h.reverted && <span style={{ color: "#DC2626" }}> · отменено</span>}
+              {!h.reverted && h.superseded_by && <span style={{ color: "#6B7280" }}> · заменено новой загрузкой</span>}
               <div style={{ color: "#6B7280" }}>Обновлено МП: {h.summary?.mp_updated ?? "—"}</div>
             </div>
-            {!h.reverted && (
+            {!h.reverted && !h.superseded_by && (
               <button onClick={() => undo(h.id)} disabled={busyId === h.id} className="px-3 py-1.5 rounded text-xs" style={{ background: "#DC262622", color: "#DC2626" }}>
                 Отменить загрузку
               </button>
@@ -74,19 +75,25 @@ function ImportHistory({ refreshKey }) {
   );
 }
 
-function ProgressBar({ progress, done }) {
-  if (!progress && !done) return null;
+function ProgressBar({ progress, phase }) {
+  if (!phase) return null;
   return (
     <div className="mt-3">
-      {!done && (
+      {phase === "uploading" && (
         <>
           <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: "#E4E7F0" }}>
             <div className="h-full rounded-full transition-all" style={{ width: `${progress}%`, background: "#ED3237" }} />
           </div>
-          <div className="text-xs mt-1" style={{ color: "#6B7280" }}>{progress}%</div>
+          <div className="text-xs mt-1" style={{ color: "#6B7280" }}>Отправка файла: {progress}%</div>
         </>
       )}
-      {done && <div className="text-sm" style={{ color: "#16A34A" }}>✓ Загружено успешно</div>}
+      {phase === "processing" && (
+        <div className="flex items-center gap-2 text-sm" style={{ color: "#6B7280" }}>
+          <span className="inline-block w-3 h-3 rounded-full animate-pulse" style={{ background: "#ED3237" }} />
+          Файл отправлен, обрабатываю данные на сервере (может занять до минуты)…
+        </div>
+      )}
+      {phase === "done" && <div className="text-sm" style={{ color: "#16A34A" }}>✓ Загружено успешно</div>}
     </div>
   );
 }
@@ -100,7 +107,7 @@ export default function MasterImports() {
   const [fssResult, setFssResult] = useState(null);
   const [fssError, setFssError] = useState("");
   const [fssProgress, setFssProgress] = useState(0);
-  const [fssDone, setFssDone] = useState(false);
+  const [fssPhase, setFssPhase] = useState(null);
 
   const [fy, setFy] = useState(27);
   const [tgtFile, setTgtFile] = useState(null);
@@ -108,28 +115,34 @@ export default function MasterImports() {
   const [tgtResult, setTgtResult] = useState(null);
   const [tgtError, setTgtError] = useState("");
   const [tgtProgress, setTgtProgress] = useState(0);
-  const [tgtDone, setTgtDone] = useState(false);
+  const [tgtPhase, setTgtPhase] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
   async function uploadFss() {
     if (!fssFile) { setFssError("Выберите файл"); return; }
-    setFssBusy(true); setFssError(""); setFssResult(null); setFssProgress(0); setFssDone(false);
+    setFssBusy(true); setFssError(""); setFssResult(null); setFssProgress(0); setFssPhase("uploading");
     try {
-      const result = await api.importFss(fssFile, fssYear, fssMonth, (pct) => setFssProgress(pct));
-      setFssDone(true);
+      const result = await api.importFss(fssFile, fssYear, fssMonth, (pct) => {
+        setFssProgress(pct);
+        if (pct >= 100) setFssPhase("processing");
+      });
+      setFssPhase("done");
       setFssResult(result);
       setRefreshKey((k) => k + 1);
-    } catch (e) { setFssError(e.message); } finally { setFssBusy(false); }
+    } catch (e) { setFssError(e.message); setFssPhase(null); } finally { setFssBusy(false); }
   }
   async function uploadTargets() {
     if (!tgtFile) { setTgtError("Выберите файл"); return; }
-    setTgtBusy(true); setTgtError(""); setTgtResult(null); setTgtProgress(0); setTgtDone(false);
+    setTgtBusy(true); setTgtError(""); setTgtResult(null); setTgtProgress(0); setTgtPhase("uploading");
     try {
-      const result = await api.importTargets(tgtFile, fy, (pct) => setTgtProgress(pct));
-      setTgtDone(true);
+      const result = await api.importTargets(tgtFile, fy, (pct) => {
+        setTgtProgress(pct);
+        if (pct >= 100) setTgtPhase("processing");
+      });
+      setTgtPhase("done");
       setTgtResult(result);
       setRefreshKey((k) => k + 1);
-    } catch (e) { setTgtError(e.message); } finally { setTgtBusy(false); }
+    } catch (e) { setTgtError(e.message); setTgtPhase(null); } finally { setTgtBusy(false); }
   }
 
   return (
@@ -161,7 +174,7 @@ export default function MasterImports() {
           </button>
         )}
         {fssError && <div className="text-sm mt-3" style={{ color: "#DC2626" }}>{fssError}</div>}
-        <ProgressBar progress={fssProgress} done={fssDone} />
+        <ProgressBar progress={fssProgress} phase={fssPhase} />
         <ResultBox result={fssResult} />
       </div>
 
@@ -181,7 +194,7 @@ export default function MasterImports() {
           </button>
         )}
         {tgtError && <div className="text-sm mt-3" style={{ color: "#DC2626" }}>{tgtError}</div>}
-        <ProgressBar progress={tgtProgress} done={tgtDone} />
+        <ProgressBar progress={tgtProgress} phase={tgtPhase} />
         <ResultBox result={tgtResult} />
       </div>
 

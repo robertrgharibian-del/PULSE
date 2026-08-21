@@ -1626,6 +1626,13 @@ app.post("/api/import/fss", auth, requireRole("master"), upload.single("file"), 
       [year, month, req.user.id, summary, changes]
     );
     importId = logRes.rows[0].id;
+    // A re-upload of the same month's FSS data becomes the source of truth —
+    // supersede earlier active imports for that exact month so they can't be
+    // mistakenly "cancelled" later and roll current data back to stale values.
+    await pool.query(
+      "update import_log set superseded_by=$1 where import_type='fss' and period_year=$2 and period_month=$3 and id != $1 and reverted=false and superseded_by is null",
+      [importId, year, month]
+    );
   } catch (e) {
     console.error("import_log insert failed (FSS import itself already succeeded):", e.message);
   }
@@ -1673,11 +1680,19 @@ app.post("/api/import/targets", auth, requireRole("master"), upload.single("file
   const summary = { mp_updated: mpUpdated, unmatched_products: unmatchedProducts, missing_sheets: missingSheets, no_mp_for_territory: noMpForTerritory };
   let importId = null;
   try {
+    const periodYear = 1999 + Number(fy);
     const logRes = await pool.query(
       "insert into import_log (import_type, period_year, uploaded_by, summary, changes) values ('targets',$1,$2,$3,$4) returning id",
-      [1999 + Number(fy), req.user.id, summary, changes]
+      [periodYear, req.user.id, summary, changes]
     );
     importId = logRes.rows[0].id;
+    // This new targets file is now the source of truth for the whole fiscal year —
+    // mark every earlier, still-active targets import for that year as superseded,
+    // so nobody can accidentally "cancel" an old one and corrupt the current data.
+    await pool.query(
+      "update import_log set superseded_by=$1 where import_type='targets' and period_year=$2 and id != $1 and reverted=false and superseded_by is null",
+      [importId, periodYear]
+    );
   } catch (e) {
     console.error("import_log insert failed (targets import itself already succeeded):", e.message);
   }
@@ -1687,7 +1702,7 @@ app.post("/api/import/targets", auth, requireRole("master"), upload.single("file
 /* ---- Import history: list + undo ---- */
 app.get("/api/import/history", auth, requireRole("master"), async (req, res) => {
   const { rows } = await pool.query(
-    `select l.id, l.import_type, l.period_year, l.period_month, l.summary, l.reverted, l.created_at, u.full_name as uploaded_by_name
+    `select l.id, l.import_type, l.period_year, l.period_month, l.summary, l.reverted, l.superseded_by, l.created_at, u.full_name as uploaded_by_name
      from import_log l join users u on u.id = l.uploaded_by order by l.created_at desc limit 50`
   );
   res.json(rows);
@@ -1699,6 +1714,7 @@ app.post("/api/import/:id/undo", auth, requireRole("master"), async (req, res) =
   const log = logRes.rows[0];
   if (!log) return res.status(404).json({ error: "Импорт не найден" });
   if (log.reverted) return res.status(409).json({ error: "Уже отменено" });
+  if (log.superseded_by) return res.status(409).json({ error: "Эта загрузка уже заменена более новой — отмена невозможна, так как отменит корректные актуальные данные" });
   const changes = log.changes || [];
   for (const c of changes) {
     await pool.query(`update report_fss set ${c.field}=$1 where report_id=$2 and product_id=$3`, [c.old_value || 0, c.report_id, c.product_id]);

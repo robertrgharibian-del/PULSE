@@ -203,6 +203,7 @@ create table if not exists password_reset_requests (
 create index if not exists idx_pw_reset_status on password_reset_requests(status);
 alter table import_log add column if not exists changes jsonb;
 alter table import_log add column if not exists reverted boolean not null default false;
+alter table import_log add column if not exists superseded_by bigint references import_log(id);
 alter table report_conversion add column if not exists previous_target_rx_per_week numeric(10,2);
 alter table report_conversion add column if not exists actual_result_rx_per_week numeric(10,2);
 alter table report_potential add column if not exists previous_target_rx_per_week numeric(10,2);
